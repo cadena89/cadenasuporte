@@ -2686,10 +2686,10 @@ index 804b505..3be1ede 100644
      | "system_mail_logs"
 diff --git a/soybean-admin/src/views/catalogs/index.vue b/soybean-admin/src/views/catalogs/index.vue
 new file mode 100644
-index 0000000..4ec3ef8
+index 0000000..b64cc9d
 --- /dev/null
 +++ b/soybean-admin/src/views/catalogs/index.vue
-@@ -0,0 +1,200 @@
+@@ -0,0 +1,210 @@
 +<script setup lang="tsx">
 +// CadenaTech: catalogos de enderecos compartilhados entre os tecnicos. Cada catalogo tem uma permissao padrao
 +// para todos e, se preciso, permissoes por tecnico. Os computadores entram pelo proprio programa Tecnico.
@@ -2811,7 +2811,7 @@ index 0000000..4ec3ef8
 +    width: 170,
 +    render: row => (
 +      <NSpace justify="center">
-+        <NButton size="small" type="primary" onClick={() => abrir(row)}>
++        <NButton size="small" type="success" onClick={() => abrir(row)}>
 +          {$t('common.edit')}
 +        </NButton>
 +        <NPopconfirm
@@ -2841,9 +2841,19 @@ index 0000000..4ec3ef8
 +    <NCard :bordered="false" size="small" class="card-wrapper">
 +      <template #header>Catálogos compartilhados</template>
 +      <template #header-extra>
-+        <NSpace>
-+          <NButton size="small" :loading="carregando" @click="carregar">{{ $t('common.refresh') }}</NButton>
-+          <NButton size="small" type="primary" @click="abrir()">Novo catálogo</NButton>
++        <NSpace wrap justify="end">
++          <NButton size="small" ghost type="primary" @click="abrir()">
++            <template #icon>
++              <icon-ic-round-plus class="text-icon" />
++            </template>
++            {{ $t('common.add') }}
++          </NButton>
++          <NButton size="small" @click="carregar">
++            <template #icon>
++              <icon-mdi-refresh class="text-icon" :class="{ 'animate-spin': carregando }" />
++            </template>
++            {{ $t('common.refresh') }}
++          </NButton>
 +        </NSpace>
 +      </template>
 +      <p class="pb-12px text-13px opacity-80">
@@ -2892,10 +2902,10 @@ index 0000000..4ec3ef8
 +</template>
 diff --git a/soybean-admin/src/views/connections/index.vue b/soybean-admin/src/views/connections/index.vue
 new file mode 100644
-index 0000000..d49644f
+index 0000000..48df1a8
 --- /dev/null
 +++ b/soybean-admin/src/views/connections/index.vue
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,86 @@
 +<script setup lang="tsx">
 +// CadenaTech: acessos em andamento, a partir da auditoria que o Cliente envia (abertura e fechamento de cada
 +// conexao). Atualiza sozinha a cada 15 segundos.
@@ -2966,7 +2976,12 @@ index 0000000..d49644f
 +    <template #header-extra>
 +      <NSpace align="center">
 +        <span v-if="atualizadoEm" class="text-12px opacity-70">atualizado às {{ atualizadoEm }}</span>
-+        <NButton size="small" :loading="carregando" @click="carregar">{{ $t('common.refresh') }}</NButton>
++        <NButton size="small" @click="carregar">
++          <template #icon>
++            <icon-mdi-refresh class="text-icon" :class="{ 'animate-spin': carregando }" />
++          </template>
++          {{ $t('common.refresh') }}
++        </NButton>
 +      </NSpace>
 +    </template>
 +    <p class="pb-12px text-13px opacity-80">
@@ -2977,3 +2992,74 @@ index 0000000..d49644f
 +    <NEmpty v-if="!carregando && lista.length === 0" description="Nenhum acesso em andamento" class="pt-24px" />
 +  </NCard>
 +</template>
+diff --git a/backend/app/controller/admin/audit.go b/backend/app/controller/admin/audit.go
+index 3447296..a81afc1 100644
+--- a/backend/app/controller/admin/audit.go
++++ b/backend/app/controller/admin/audit.go
+@@ -7,6 +7,7 @@ import (
+ 
+ 	"github.com/kataras/iris/v12"
+ 	"github.com/kataras/iris/v12/mvc"
++	"github.com/tidwall/gjson"
+ 	"xorm.io/xorm"
+ )
+ 
+@@ -72,6 +73,16 @@ func (c *AuditController) HandleList() mvc.Result {
+ 
+ 	list := make([]iris.Map, 0)
+ 	for _, a := range auditList {
++		// CadenaTech: o fim vem do "close" do programa; a data zero (conexao ainda aberta ou sem fechamento) fica vazia
++		fim := ""
++		if a.ClosedAt.Year() > 1970 {
++			fim = a.ClosedAt.Format(config.TimeFormat)
++		}
++		// peer = ["<id do tecnico>", "<nome do tecnico>"]
++		tecnico := gjson.Get(a.Peer, "1").String()
++		if tecnico == "" {
++			tecnico = gjson.Get(a.Peer, "0").String()
++		}
+ 		list = append(list, iris.Map{
+ 			"id":          a.Id,
+ 			"conn_id":     a.ConnId,
+@@ -80,7 +91,10 @@ func (c *AuditController) HandleList() mvc.Result {
+ 			"session_id":  a.SessionId,
+ 			"uuid":        a.Uuid,
+ 			"type":        a.Type,
++			"tecnico":     tecnico,
++			"tecnico_id":  gjson.Get(a.Peer, "0").String(),
+ 			"created_at":  a.CreatedAt.Format(config.TimeFormat),
++			"closed_at":   fim,
+ 		})
+ 	}
+ 	return c.Success(iris.Map{
+diff --git a/soybean-admin/src/views/audit/baseLogs/index.vue b/soybean-admin/src/views/audit/baseLogs/index.vue
+index 5cfa31e..8232829 100644
+--- a/soybean-admin/src/views/audit/baseLogs/index.vue
++++ b/soybean-admin/src/views/audit/baseLogs/index.vue
+@@ -77,6 +77,13 @@ const {
+       title: $t('dataMap.audit.rustdesk_id'),
+       align: 'center'
+     },
++    {
++      // CadenaTech: quem fez o acesso (nome da conta do Tecnico)
++      key: 'tecnico',
++      title: 'Técnico',
++      align: 'center',
++      render: row => row.tecnico || '—'
++    },
+     {
+       key: 'ip',
+       title: $t('dataMap.audit.ip'),
+diff --git a/soybean-admin/src/typings/api.d.ts b/soybean-admin/src/typings/api.d.ts
+index 1513bc1..f0d8d88 100644
+--- a/soybean-admin/src/typings/api.d.ts
++++ b/soybean-admin/src/typings/api.d.ts
+@@ -142,6 +142,8 @@ declare namespace Api {
+       session_id: string;
+       uuid: string;
+       type: number;
++      tecnico?: string;
++      tecnico_id?: string;
+       closed_at?: string;
+     }>;
+     type AuditLogList = Common.PaginatingQueryRecord<AuditLog>;

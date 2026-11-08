@@ -305,12 +305,26 @@ fn enviar_arquivo(c: &Configuracao, arquivo: &Path) -> ResultType<String> {
     }
 }
 
-/// Nome do tecnico para o arquivo no servidor: o do DefinirNomeTecnico.bat ou o usuario do Windows,
-/// em minusculas, sem acentos e sem espacos
+/// Nome do tecnico para o arquivo no servidor, na mesma ordem do nome mostrado ao cliente: o do
+/// DefinirNomeTecnico.bat, o nome da conta logada na API e, por ultimo, o usuario do Windows.
+/// Fica em minusculas, sem acentos e sem espacos
 fn nome_tecnico() -> String {
     const DE: &str = "\u{e1}\u{e0}\u{e2}\u{e3}\u{e4}\u{e9}\u{e8}\u{ea}\u{eb}\u{ed}\u{ec}\u{ee}\u{ef}\u{f3}\u{f2}\u{f4}\u{f5}\u{f6}\u{fa}\u{f9}\u{fb}\u{fc}\u{e7}\u{f1}";
     const PARA: &str = "aaaaaeeeeiiiiooooouuuucn";
     let mut nome = fs::read_to_string(Config::path("__PREFIXO__-nome-tecnico.txt")).unwrap_or_default();
+    if nome.trim().is_empty() {
+        nome = serde_json::from_str::<serde_json::Value>(&hbb_common::config::LocalConfig::get_option("user_info"))
+            .ok()
+            .and_then(|x| {
+                ["display_name", "name"].iter().find_map(|k| {
+                    x.get(*k)
+                        .and_then(|v| v.as_str())
+                        .map(|v| v.trim().to_owned())
+                        .filter(|v| !v.is_empty())
+                })
+            })
+            .unwrap_or_default();
+    }
     if nome.trim().is_empty() {
         nome = std::env::var("USERNAME").unwrap_or_default();
     }
