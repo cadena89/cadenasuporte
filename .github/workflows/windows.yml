@@ -1,0 +1,134 @@
+# Compila o Cliente e o Tecnico do Windows (e o instalador silencioso) a partir deste repositorio e, se o
+# SignPath estiver configurado, envia os executaveis para assinatura de codigo.
+#
+# Configuracao em Settings > Secrets and variables > Actions:
+#   Variaveis (aba Variables):
+#     CADENA_SERVIDOR1, CADENA_CHAVE1, CADENA_NOME1   servidor principal (hbbs), chave publica e nome na tela
+#     CADENA_SERVIDOR2, CADENA_CHAVE2, CADENA_NOME2   segundo servidor (opcional)
+#     CADENA_API                                      endereco HTTPS da API
+#     CADENA_REPO_ATUALIZACAO, CADENA_CHAVE_ATUALIZACAO  releases e chave PUBLICA Ed25519 da atualizacao
+#     SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG, SIGNPATH_SIGNING_POLICY_SLUG  (depois de aprovado no SignPath)
+#   Segredo (aba Secrets):
+#     SIGNPATH_API_TOKEN
+# A chave PRIVADA da atualizacao nunca vai para o GitHub: o versao.assinado e feito na maquina que publica
+# (scripts\9_publicar.ps1 -SemCompilar), com os executaveis ja assinados.
+name: Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      numero:
+        description: 'Numero da versao (atualizacao automatica: precisa ser maior que o instalado)'
+        required: true
+        default: '1'
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    env:
+      CADENA_RAIZ: C:\cb
+      CADENA_ENTREGA: C:\cb\entrega
+      CADENA_MARCA: cadenatech
+      CADENA_SERVIDOR1: ${{ vars.CADENA_SERVIDOR1 }}
+      CADENA_CHAVE1: ${{ vars.CADENA_CHAVE1 }}
+      CADENA_NOME1: ${{ vars.CADENA_NOME1 }}
+      CADENA_SERVIDOR2: ${{ vars.CADENA_SERVIDOR2 }}
+      CADENA_CHAVE2: ${{ vars.CADENA_CHAVE2 }}
+      CADENA_NOME2: ${{ vars.CADENA_NOME2 }}
+      CADENA_API: ${{ vars.CADENA_API }}
+      CADENA_REPO_ATUALIZACAO: ${{ vars.CADENA_REPO_ATUALIZACAO }}
+      CADENA_CHAVE_ATUALIZACAO: ${{ vars.CADENA_CHAVE_ATUALIZACAO }}
+      # Tag "v1.5.1-7" -> numero 7; execucao manual -> o numero informado
+      CADENA_NUMERO: ${{ inputs.numero || '1' }}
+      VCPKG_DEFAULT_BINARY_CACHE: C:\cb\vcpkg-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Conferir a configuracao
+        shell: powershell
+        run: |
+          $faltam = 'CADENA_SERVIDOR1', 'CADENA_CHAVE1', 'CADENA_REPO_ATUALIZACAO', 'CADENA_CHAVE_ATUALIZACAO' | Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
+          if ($faltam) { throw "Defina em Settings > Secrets and variables > Actions > Variables: $($faltam -join ', ')" }
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $n = ($env:GITHUB_REF_NAME -split '-')[-1]
+            if ($n -notmatch '^\d+$') { throw "A tag precisa terminar com o numero da versao, ex.: v1.5.1-7" }
+            "CADENA_NUMERO=$n" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          }
+          git config --system core.longpaths true
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+
+      # Rust, cargo-expand/flutter_rust_bridge_codegen e os pacotes ja compilados do vcpkg
+      - name: Cache das ferramentas
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\cb\ferramentas\rustup
+            C:\cb\ferramentas\cargo
+            C:\cb\vcpkg-cache
+          key: windows-ferramentas-v1-${{ hashFiles('scripts/1_ferramentas.ps1', 'scripts/3_dependencias.ps1') }}
+
+      - name: Ferramentas e codigo do RustDesk
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\1_ferramentas.ps1
+
+      - name: Bibliotecas (vcpkg) e geradores
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\3_dependencias.ps1
+
+      - name: Marca, servidores e modificacoes
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\2_marca.ps1
+
+      - name: Compilar Tecnico e Cliente
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\8_compilar_perfis.ps1
+
+      - name: Enviar os executaveis (sem assinatura)
+        id: envio
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nao-assinado
+          path: |
+            C:/cb/entrega/*-install.exe
+            C:/cb/entrega/Instalar*.exe
+          if-no-files-found: error
+
+      - name: Fonte correspondente (AGPL) e atalhos do tecnico
+        uses: actions/upload-artifact@v4
+        with:
+          name: fonte-e-atalhos
+          path: |
+            C:/cb/entrega/fonte/
+            C:/cb/entrega/*.bat
+          if-no-files-found: error
+
+      # So depois que o projeto for aprovado no SignPath (https://signpath.org) e as variaveis forem definidas
+      - name: Assinar com o SignPath
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.envio.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: C:\cb\assinado
+
+      - name: Enviar os executaveis assinados
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-assinado
+          path: C:/cb/assinado/
+          if-no-files-found: error

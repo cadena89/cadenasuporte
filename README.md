@@ -112,12 +112,27 @@ Para trocar o SQLite pelo PostgreSQL, faça nesta ordem:
 
 ## Assinatura de código
 
-Os instaladores podem ser assinados pela [SignPath Foundation](https://signpath.org), que oferece certificados gratuitos para projetos open source. Para isso:
+Os instaladores do Windows são compilados no GitHub Actions pelo workflow [`.github/workflows/windows.yml`](.github/workflows/windows.yml). Ele roda manualmente (Actions > Windows > Run workflow, informando o número da versão) ou a cada tag `v<versão>-<número>`, por exemplo `v1.5.1-2`.
 
-- a compilação precisa rodar num CI público (GitHub Actions) a partir deste repositório;
-- o certificado sai em nome da *SignPath Foundation*.
+**Variáveis do workflow** (Settings > Secrets and variables > Actions > Variables):
 
-O workflow de CI ainda está no roteiro.
+- servidor principal: `CADENA_SERVIDOR1`, `CADENA_CHAVE1`, `CADENA_NOME1`;
+- segundo servidor, opcional: `CADENA_SERVIDOR2`, `CADENA_CHAVE2`, `CADENA_NOME2`;
+- API: `CADENA_API`;
+- atualização automática: `CADENA_REPO_ATUALIZACAO` e `CADENA_CHAVE_ATUALIZACAO`, a chave **pública**.
+
+O workflow publica os executáveis como artefatos, junto com o pacote de fonte da AGPL.
+
+A assinatura fica com a [SignPath Foundation](https://signpath.org), que oferece certificados gratuitos para projetos open source. O certificado sai em nome da *SignPath Foundation*. Para ligar a assinatura:
+
+1. Peça a adesão do projeto em signpath.org.
+2. Depois da aprovação, defina as variáveis `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` e `SIGNPATH_SIGNING_POLICY_SLUG` e o segredo `SIGNPATH_API_TOKEN`.
+
+A partir daí, cada execução envia os executáveis ao SignPath e publica também o artefato `windows-assinado`.
+
+A chave **privada** da atualização automática nunca vai para o GitHub. Para montar a release, baixe os executáveis assinados para a pasta de entrega e rode `scripts\9_publicar.ps1 -SemCompilar` na máquina que guarda a chave.
+
+**Limitação conhecida:** o `Instalar*.exe` (instalador silencioso) leva dentro uma cópia do Cliente feita antes da assinatura. Só o arquivo de fora sai assinado.
 
 ## Licença e créditos
 

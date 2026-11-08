@@ -5,8 +5,10 @@
 # Cada valor pode ser trocado na hora por uma variavel de ambiente, por exemplo num CI:
 #   CADENA_MARCA, CADENA_RAIZ, CADENA_ENTREGA, CADENA_SERVIDOR1, CADENA_CHAVE1, CADENA_NOME1,
 #   CADENA_SERVIDOR2, CADENA_CHAVE2, CADENA_NOME2, CADENA_API, CADENA_REPO_ATUALIZACAO,
-#   CADENA_CHAVE_ATUALIZACAO (chave publica Ed25519 em base64), CADENA_DISTRO_WSL
+#   CADENA_CHAVE_ATUALIZACAO (chave publica Ed25519 em base64), CADENA_DISTRO_WSL, CADENA_TAG_RUSTDESK,
+#   CADENA_NUMERO (numero da versao compilado, no lugar do <Entrega>\numero.txt)
 # CADENA_RESERVA=1 troca o servidor 1 pelo 2 (0_nova_versao.ps1 -Reserva).
+# Sem arquivo de configuracao e com CADENA_SERVIDOR1 (ou CI) definido, so as variaveis sao usadas.
 $Repositorio = Split-Path $PSScriptRoot -Parent
 
 # Le um .psd1 sempre como UTF-8 (o Import-PowerShellDataFile do PowerShell 5.1 estraga os acentos sem BOM)
@@ -28,10 +30,14 @@ function Valor([string]$variavel, $padrao) {
 }
 
 $ArqConfig = Valor 'CADENA_CONFIG' "$Repositorio\config.local.psd1"
-if (-not (Test-Path $ArqConfig)) {
+if (Test-Path $ArqConfig) {
+  $Cfg = Ler-Psd1 $ArqConfig
+} elseif ($env:CADENA_SERVIDOR1 -or $env:CI) {
+  # Sem arquivo (ex.: GitHub Actions): tudo vem das variaveis CADENA_*
+  $Cfg = @{}
+} else {
   throw "Configuracao nao encontrada: $ArqConfig. Copie config.exemplo.psd1 para config.local.psd1 e preencha (ou defina CADENA_CONFIG)."
 }
-$Cfg = Ler-Psd1 $ArqConfig
 if (-not $Cfg.Servidor1) { $Cfg.Servidor1 = @{} }
 if (-not $Cfg.Servidor2) { $Cfg.Servidor2 = @{} }
 
@@ -84,6 +90,13 @@ $ChavePrivada = $Cfg.ChavePrivada
 # Numero da versao da marca: sobe a cada entrega e decide a atualizacao automatica
 $ArqNumero = "$Entrega\numero.txt"
 $ArqNumeroAndroid = "$Entrega\android\numero.txt"
+# No CI o numero vem de CADENA_NUMERO (o arquivo nao existe entre uma execucao e outra)
+if ($env:CADENA_NUMERO) {
+  if ($env:CADENA_NUMERO -notmatch '^\d+$') { throw "CADENA_NUMERO precisa ser um numero: $env:CADENA_NUMERO" }
+  New-Item -ItemType Directory -Force $Entrega | Out-Null
+  Set-Content -Encoding ascii $ArqNumero $env:CADENA_NUMERO
+}
 
 # Versao do RustDesk usada (tag do GitHub)
-$TagRustDesk = if ($Cfg.TagRustDesk) { $Cfg.TagRustDesk } else { '1.5.1' }
+$TagRustDesk = Valor 'CADENA_TAG_RUSTDESK' $Cfg.TagRustDesk
+if (-not $TagRustDesk) { $TagRustDesk = '1.5.1' }
