@@ -1,0 +1,27 @@
+# Exemplo de server.yaml para o rustdesk-api-server-pro com os recursos do CadenaTech.
+# Copie para a pasta do servidor como server.yaml. Segredos (signKey, DSN com senha) ficam melhor no .env
+# ao lado (veja .env.exemplo): o .env e as variaveis de ambiente valem por cima deste arquivo.
+# signKey: fica no .env (RUSTDESK_API_SIGN_KEY, 32+ caracteres aleatorios). Sem ela, o servidor sorteia uma
+# chave a cada inicio e todos precisam entrar de novo
+debugMode: false
+db:
+  driver: "postgres"   # sqlite | mysql | postgres
+  dsn: ""              # vazio aqui; defina RUSTDESK_API_DB_DSN no .env
+  timeZone: "America/Sao_Paulo"
+  showSql: false
+httpConfig:
+  printRequestLog: false
+  staticdir: "./dist"
+  port: "127.0.0.1:21114"   # so local; publique por um proxy reverso ou tunel com HTTPS
+smtpConfig:
+  host: "127.0.0.1"
+  port: 1025
+  username: ""
+  password: ""
+  encryption: "none"
+  from: "suporte@exemplo.com.br"
+jobsConfig:
+  deviceCheckJob:
+    duration: 30
+cadena:
+  grupoClientes: "Clientes"   # nome do grupo da aba "Grupo" do Tecnico

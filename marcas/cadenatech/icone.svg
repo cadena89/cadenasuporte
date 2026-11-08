@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<defs>
+  <clipPath id="topo"><rect x="38" y="28" width="24" height="22"/></clipPath>
+  <clipPath id="baixo"><rect x="38" y="50" width="24" height="22"/></clipPath>
+</defs>
+<rect width="100" height="100" rx="22" fill="#016BFB"/>
+<g transform="rotate(-45 50 50)" fill="none">
+  <rect x="14" y="39" width="46" height="22" rx="11" stroke="#fff" stroke-width="7.5"/>
+  <rect x="40" y="39" width="46" height="22" rx="11" stroke="#016BFB" stroke-width="13" clip-path="url(#baixo)"/>
+  <rect x="40" y="39" width="46" height="22" rx="11" stroke="#fff" stroke-width="7.5"/>
+  <rect x="14" y="39" width="46" height="22" rx="11" stroke="#016BFB" stroke-width="13" clip-path="url(#topo)"/>
+  <rect x="14" y="39" width="46" height="22" rx="11" stroke="#fff" stroke-width="7.5" clip-path="url(#topo)"/>
+</g>
+</svg>

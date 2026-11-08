@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<defs><linearGradient id="elo" gradientUnits="userSpaceOnUse" x1="22" y1="78" x2="78" y2="22"><stop offset="0" stop-color="#1066E8"/><stop offset="1" stop-color="#0BF0F5"/></linearGradient></defs>
+<rect width="100" height="100" rx="22" fill="#181C27"/>
+<defs>
+  <mask id="emA" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+    <rect width="100" height="100" fill="#fff"/>
+    <g transform="rotate(-45 50 50)"><g clip-path="url(#ecBaixo)"><rect x="40" y="39" width="46" height="22" rx="11" fill="none" stroke="#000" stroke-width="13"/></g></g>
+  </mask>
+  <mask id="emB" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+    <rect width="100" height="100" fill="#fff"/>
+    <g transform="rotate(-45 50 50)"><g clip-path="url(#ecTopo)"><rect x="14" y="39" width="46" height="22" rx="11" fill="none" stroke="#000" stroke-width="13"/></g></g>
+  </mask>
+  <clipPath id="ecTopo"><rect x="38" y="28" width="24" height="22"/></clipPath>
+  <clipPath id="ecBaixo"><rect x="38" y="50" width="24" height="22"/></clipPath>
+</defs>
+<g mask="url(#emA)"><rect transform="rotate(-45 50 50)" x="14" y="39" width="46" height="22" rx="11" fill="none" stroke="url(#elo)" stroke-width="7.5"/></g>
+<g mask="url(#emB)"><rect transform="rotate(-45 50 50)" x="40" y="39" width="46" height="22" rx="11" fill="none" stroke="url(#elo)" stroke-width="7.5"/></g>
+</svg>

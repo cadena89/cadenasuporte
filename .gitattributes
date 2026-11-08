@@ -1,0 +1,14 @@
+* text=auto
+*.ps1 text eol=crlf
+*.psd1 text eol=crlf
+*.bat text eol=crlf
+*.cs text eol=crlf
+*.sh text eol=lf
+*.rs text eol=lf
+*.dart text eol=lf
+*.ts text eol=lf
+*.svg text eol=lf
+# O patch da API e aplicado byte a byte pelo git apply
+*.patch -text
+*.png binary
+*.ico binary

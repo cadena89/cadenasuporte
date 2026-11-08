@@ -1,0 +1,65 @@
+# ===== Segredos: nunca vao para o repositorio =====
+# Configuracao local (servidores, chaves, caminhos privados) e variaveis de ambiente
+config.local.psd1
+config-*.psd1
+!config.exemplo.psd1
+.env
+.env.*
+!.env.exemplo
+# Chave privada da atualizacao automatica e qualquer chave/certificado
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+key.properties
+senha.properties
+id_ed25519
+id_ed25519.pub
+id_rsa*
+cert.pem
+# Credenciais do FTP do tecnico e do tunel Cloudflare
+*-ftp.txt
+vetor-ftp.txt
+cadena-ftp.txt
+*-nome-tecnico.txt
+vetor-suporte-api.json
+cloudflared/
+*.json.credenciais
+credenciais*.txt
+# Bancos de dados da API
+server.db
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+server.yaml
+# Marcas privadas de clientes (use uma pasta fora do repositorio)
+privado/
+marcas/*
+!marcas/cadenatech/
+
+# ===== Gerados =====
+entrega/
+entrega-*/
+marca-gerada/
+instalador-gerado/
+publicar/
+*.exe
+*.apk
+*.patch.orig
+*.log
+logs/
+node_modules/
+dist/
+build/
+target/
+
+# ===== Sistema e editores =====
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+*.swp
