@@ -3278,10 +3278,10 @@ index 1513bc1..82f2746 100644
      type AuditLogSearchParams = CommonType.RecordNullable<
 diff --git a/backend/app/gravacoes/gravacoes.go b/backend/app/gravacoes/gravacoes.go
 new file mode 100644
-index 0000000..2ebb851
+index 0000000..a5abaf1
 --- /dev/null
 +++ b/backend/app/gravacoes/gravacoes.go
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,178 @@
 +package gravacoes
 +
 +// CadenaTech: gravacoes dos acessos, enviadas pelo Tecnico ao FTP da empresa (cadena_ftp.rs), mostradas no
@@ -3442,6 +3442,12 @@ index 0000000..2ebb851
 +			f.Close()
 +			continue
 +		}
++		// Sem gzip: o app comprime tudo (iris.Compression), o que quebra o Range (tamanho anunciado diferente
++		// do enviado) e o navegador para o video no meio ("data source error") ou a Cloudflare devolve 502
++		_ = ctx.CompressWriter(false)
++		// O middleware ja tinha anunciado gzip: tira o cabecalho, senao o navegador tenta descomprimir o video
++		ctx.ResponseWriter().Header().Del("Content-Encoding")
++		ctx.ResponseWriter().Header().Del("Vary")
 +		tipo := "video/webm"
 +		if strings.HasSuffix(nome, ".mp4") {
 +			tipo = "video/mp4"
