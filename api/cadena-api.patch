@@ -270,18 +270,47 @@ index 0000000..7829c14
 +	return c.Success(list, "ok")
 +}
 diff --git a/backend/app/controller/admin/dashboard.go b/backend/app/controller/admin/dashboard.go
-index 3507c2d..ef37f6d 100644
+index 3507c2d..b18eda9 100644
 --- a/backend/app/controller/admin/dashboard.go
 +++ b/backend/app/controller/admin/dashboard.go
-@@ -3,6 +3,7 @@ package admin
+@@ -3,6 +3,8 @@ package admin
  import (
  	"fmt"
  	"rustdesk-api-server-pro/app/model"
++	"strings"
 +	"time"
  
  	"github.com/golang-module/carbon/v2"
  	"github.com/kataras/iris/v12"
-@@ -25,7 +26,7 @@ func (c *DashboardController) GetDashboardStat() mvc.Result {
+@@ -13,6 +15,27 @@ type DashboardController struct {
+ 	basicController
+ }
+ 
++// nomeSistema resume o sistema informado pelo programa: "windows / Windows 11 Pro - 11 (26200)" -> "Windows 11 Pro",
++// "linux / Ubuntu 22.04" -> "Ubuntu 22.04", "android" -> "Android"
++func nomeSistema(os string) string {
++	os = strings.TrimSpace(os)
++	if os == "" {
++		return "Desconhecido"
++	}
++	familia, detalhe, temDetalhe := strings.Cut(os, "/")
++	nome := strings.TrimSpace(familia)
++	if temDetalhe && strings.TrimSpace(detalhe) != "" {
++		nome = strings.TrimSpace(detalhe)
++	}
++	if i := strings.Index(nome, " - "); i > 0 {
++		nome = strings.TrimSpace(nome[:i])
++	}
++	if nome == "" {
++		return "Desconhecido"
++	}
++	return strings.ToUpper(nome[:1]) + nome[1:]
++}
++
+ func (c *DashboardController) GetDashboardStat() mvc.Result {
+ 
+ 	userCount, err := c.Db.Count(&model.User{})
+@@ -25,7 +48,7 @@ func (c *DashboardController) GetDashboardStat() mvc.Result {
  		return c.Error(nil, err.Error())
  	}
  
@@ -290,7 +319,7 @@ index 3507c2d..ef37f6d 100644
  	if err != nil {
  		return c.Error(nil, err.Error())
  	}
-@@ -51,33 +52,29 @@ func (c *DashboardController) GetDashboardLineCharts() mvc.Result {
+@@ -51,33 +74,29 @@ func (c *DashboardController) GetDashboardLineCharts() mvc.Result {
  	startOfWeekString := startOfWeek.ToDateTimeString()
  	endOfWeekString := endOfWeek.ToDateTimeString()
  
@@ -337,27 +366,27 @@ index 3507c2d..ef37f6d 100644
  	var xDateLine []string
  	var seriesUser []int
  	var seriesPeer []int
-@@ -101,10 +98,29 @@ func (c *DashboardController) GetDashboardPieCharts() mvc.Result {
+@@ -101,10 +120,29 @@ func (c *DashboardController) GetDashboardPieCharts() mvc.Result {
  		Value int    `json:"value"`
  		Name  string `json:"name"`
  	}
 -	pieMap := make([]pieChartsData, 0)
 -	err := c.Db.Table(&model.Peer{}).GroupBy("platform").Select("case when `platform` = '' then 'unknown' else `platform` end as `name`, count(*) as `value`").Find(&pieMap)
-+	// CadenaTech: agrupa aqui, sem crases no SQL (PostgreSQL)
-+	var plataformas []struct {
-+		Platform string `xorm:"'platform'"`
++	// CadenaTech: o original contava a tabela peer (catalogo de enderecos pessoal), que fica vazia porque os
++	// tecnicos usam a aba Grupo e os catalogos compartilhados. Conta os dispositivos (os mesmos do card
++	// "Dispositivos"), pelo sistema que o programa informa: "windows / Windows 11 Pro - 11 (26200)" vira
++	// "Windows 11 Pro". Agrupa aqui, sem crases no SQL (PostgreSQL)
++	var sistemas []struct {
++		Os string `xorm:"'os'"`
 +	}
-+	err := c.Db.Table(&model.Peer{}).Cols("platform").Find(&plataformas)
++	err := c.Db.Table(&model.Device{}).Cols("os").Find(&sistemas)
  	if err != nil {
  		return c.Error(nil, err.Error())
  	}
 +	contagem := make(map[string]int)
 +	ordem := make([]string, 0)
-+	for _, linha := range plataformas {
-+		p := linha.Platform
-+		if p == "" {
-+			p = "unknown"
-+		}
++	for _, linha := range sistemas {
++		p := nomeSistema(linha.Os)
 +		if _, existe := contagem[p]; !existe {
 +			ordem = append(ordem, p)
 +		}
