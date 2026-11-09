@@ -803,6 +803,33 @@ $Config = "$Fonte\flutter\lib\desktop\pages\desktop_setting_page.dart"
 $TextoConfig = $Latin.GetString([IO.File]::ReadAllBytes($Config))
 $Tela = [IO.File]::ReadAllText("$PSScriptRoot\modelos\cadena_ftp_tela.dart") -replace "`r`n", "`n"
 [IO.File]::WriteAllBytes($Config, $Latin.GetBytes($TextoConfig + $Tela))
+
+# Tela inicial do Tecnico no visual aprovado (2026-11-08): lateral com as secoes e a conta, barra de cima com ID, busca
+# e visao, e o cartao novo. A lista, o status online e os menus continuam os do RustDesk; muda so a aparencia.
+# Os dois modelos vao como arquivos proprios (UTF-8); o cartao e "part of" do peer_card.dart para usar o menu dele
+Copy-Item -Force "$PSScriptRoot\modelos\cadena_inicio.dart" "$Fonte\flutter\lib\desktop\pages\cadena_inicio.dart"
+Copy-Item -Force "$PSScriptRoot\modelos\cadena_cartao.dart" "$Fonte\flutter\lib\common\widgets\cadena_cartao.dart"
+& git -C $Fonte add -N flutter/lib/desktop/pages/cadena_inicio.dart flutter/lib/common/widgets/cadena_cartao.dart
+Trocar "$Fonte\flutter\lib\common\widgets\peer_card.dart" @{
+  "import 'dart:math' as math;" = "import 'dart:math' as math;`n`n// CadenaTech: cartao do Tecnico`npart 'cadena_cartao.dart';"
+  'Widget _buildPeerCard\(\r?\n      BuildContext context, Peer peer, Rx<BoxDecoration\?> deco\) \{' = "Widget _buildPeerCard(`n      BuildContext context, Peer peer, Rx<BoxDecoration?> deco) {`n    // CadenaTech: cartao novo no Tecnico (cadena_cartao.dart)`n    if (bind.isOutgoingOnly()) return _cadenaCartao(context, peer, deco);"
+}
+Trocar "$Fonte\flutter\lib\common\widgets\peers_view.dart" @{
+  'width: 220, height: 140, child: visibilityChild\)' = "width: bind.isOutgoingOnly() ? 236 : 220,`n                              height: bind.isOutgoingOnly() ? 226 : 140,`n                              child: visibilityChild)"
+}
+Trocar "$Fonte\flutter\lib\common\widgets\peer_tab_page.dart" @{
+  'class PeerTabPage extends StatefulWidget \{' = "// CadenaTech: a lateral do Tecnico (cadena_inicio.dart) troca de aba e recarrega por aqui`nFuture<void> Function(int)? cadenaTrocarAba;`nvoid Function()? cadenaRecarregarAba;`n`nclass PeerTabPage extends StatefulWidget {"
+  '_PeerTabPageState\(\) \{\r?\n    _loadLocalOptions\(\);\r?\n  \}' = "_PeerTabPageState() {`n    _loadLocalOptions();`n    cadenaTrocarAba = handleTabSelection;`n    cadenaRecarregarAba = () {`n      if (gFFI.peerTabModel.currentTab < entries.length) {`n        entries[gFFI.peerTabModel.currentTab].load?.call();`n      }`n    };`n  }"
+  'children: \[\r?\n        Obx\(\(\) => SizedBox\(\r?\n              height: 32,' = "children: [`n        // CadenaTech: no Tecnico as abas ficam na lateral; o cabecalho so aparece na selecao multipla`n        if (!bind.isOutgoingOnly() || model.multiSelectionMode)`n        Obx(() => SizedBox(`n              height: 32,"
+}
+Trocar "$Fonte\flutter\lib\desktop\pages\desktop_home_page.dart" @{
+  "import 'package:flutter_hbb/desktop/pages/connection_page.dart';" = "import 'package:flutter_hbb/desktop/pages/connection_page.dart';`nimport 'package:flutter_hbb/desktop/pages/cadena_inicio.dart';"
+  '        buildLeftPane\(context\),\r?\n        if \(!isIncomingOnly\) const VerticalDivider\(width: 1\),' = "        // CadenaTech: lateral nova no Tecnico (cadena_inicio.dart)`n        bind.isOutgoingOnly() ? const CadenaLateral() : buildLeftPane(context),`n        if (!isIncomingOnly && !bind.isOutgoingOnly())`n          const VerticalDivider(width: 1),"
+}
+Trocar "$Fonte\flutter\lib\desktop\pages\connection_page.dart" @{
+  "import '../../common/widgets/peer_tab_page.dart';" = "import '../../common/widgets/peer_tab_page.dart';`nimport 'cadena_inicio.dart';"
+  'Row\(\r?\n              children: \[\r?\n                Flexible\(child: _buildRemoteIDTextField\(context\)\),\r?\n              \],\r?\n            \)\.marginOnly\(top: 22\),\r?\n            SizedBox\(height: 12\),\r?\n            Divider\(\)\.paddingOnly\(right: 12\),\r?\n            Expanded\(child: PeerTabPage\(\)\),\r?\n          \],\r?\n        \)\.paddingOnly\(left: 12\.0\)\),' = "// CadenaTech: no Tecnico, barra de cima e titulo da secao (cadena_inicio.dart)`n            if (isOutgoingOnly)`n              CadenaTopo(controlador: _idController, conectar: onConnect),`n            if (isOutgoingOnly) const CadenaTituloSecao().paddingOnly(left: 18),`n            if (!isOutgoingOnly)`n              Row(`n                children: [`n                  Flexible(child: _buildRemoteIDTextField(context)),`n                ],`n              ).marginOnly(top: 22),`n            if (!isOutgoingOnly) SizedBox(height: 12),`n            if (!isOutgoingOnly) Divider().paddingOnly(right: 12),`n            Expanded(`n                child: PeerTabPage().paddingOnly(`n                    left: isOutgoingOnly ? 18 : 0,`n                    right: isOutgoingOnly ? 6 : 0)),`n          ],`n        ).paddingOnly(left: isOutgoingOnly ? 0 : 12.0)),"
+}
 # "Pronto" com os servidores que respondem: "Pronto · Principal, Reserva". Nenhum respondendo: "Sem conexão com o
 # servidor" e a bolinha vermelha. Antes do primeiro teste (null), fica o "Pronto" normal (Windows e Android)
 Trocar "$Fonte\flutter\lib\desktop\pages\connection_page.dart" @{
@@ -814,7 +841,7 @@ Trocar "$Fonte\flutter\lib\desktop\pages\connection_page.dart" @{
 # No Tecnico (so acessa) a linha de status vinha escondida, porque ele nao se registra no servidor. Ela passa a
 # aparecer e a depender so do teste dos servidores
 Trocar "$Fonte\flutter\lib\desktop\pages\connection_page.dart" @{
-  'if \(!isOutgoingOnly\) const Divider\(height: 1\),\r?\n        if \(!isOutgoingOnly\) OnlineStatusWidget\(\)' = "// CadenaTech: no Tecnico tambem, com os servidores que respondem`n        const Divider(height: 1),`n        OnlineStatusWidget()"
+  'if \(!isOutgoingOnly\) const Divider\(height: 1\),\r?\n        if \(!isOutgoingOnly\) OnlineStatusWidget\(\)' = "// CadenaTech: no Tecnico o status dos servidores fica no cartao da conta, na lateral (cadena_inicio.dart)`n        if (!isOutgoingOnly) const Divider(height: 1),`n        if (!isOutgoingOnly) OnlineStatusWidget()"
   '                color: _svcStopped\.value \|\|' = "                color: bind.isOutgoingOnly()`n                    ? (_cadenaServidores.value == ''`n                        ? Color.fromARGB(255, 224, 79, 95)`n                        : Color.fromARGB(255, 50, 190, 166))`n                    : _svcStopped.value ||"
   '      _svcStopped\.value\r?\n          \? translate\("Service is not running"\)' = "      bind.isOutgoingOnly()`n          ? (_cadenaServidores.value == ''`n              ? 'Sem conexão com o servidor'`n              : _cadenaServidores.value == null`n                  ? 'Verificando servidores...'`n                  : '`${translate('Ready')} · `${_cadenaServidores.value}')`n          : _svcStopped.value`n          ? translate(`"Service is not running`")"
 }
