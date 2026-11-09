@@ -29,6 +29,7 @@ O repositório **não traz uma cópia do RustDesk**. Os scripts baixam o código
 - catálogos de endereços compartilhados, com permissão por técnico;
 - tela de acessos em andamento;
 - registro de acessos com técnico, hora final e as gravações enviadas por FTP (botão Assistir, em `pastasGravacoes`);
+- derrubar um acesso pelo painel (Acessos agora > Desconectar), alertas de segurança enviados pelos Clientes e limpeza automática de registros e gravações (`diasRegistros`, `diasGravacoes`);
 - bloqueio de login depois de tentativas erradas;
 - **PostgreSQL**, além de SQLite e MySQL, e o comando `migrate-db` para migrar os dados.
 

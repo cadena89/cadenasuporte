@@ -38,28 +38,33 @@ index 3178ec3..7a3d61c 100644
  
 diff --git a/backend/app/controller/admin/cadena.go b/backend/app/controller/admin/cadena.go
 new file mode 100644
-index 0000000..7829c14
+index 0000000..4b4d9e1
 --- /dev/null
 +++ b/backend/app/controller/admin/cadena.go
-@@ -0,0 +1,227 @@
+@@ -0,0 +1,298 @@
 +package admin
 +
 +// CadenaTech: telas do painel acrescentadas pelo CadenaTech.
 +//   - /catalogs/*: catalogos de enderecos compartilhados (shared = 1, user_id = 0), com regra padrao
 +//     para todos os tecnicos e regras por tecnico (address_book_rule).
 +//   - /connections/active: acessos em andamento, a partir da auditoria de conexoes.
++//   - /connections/disconnect: derruba um acesso (pelo heartbeat do Cliente).
++//   - /alarms/list: alertas de seguranca enviados pelos Clientes.
 +
 +import (
 +	"encoding/json"
 +	"strings"
 +	"time"
 +
++	"rustdesk-api-server-pro/app/desconexao"
 +	"rustdesk-api-server-pro/app/model"
 +	"rustdesk-api-server-pro/config"
++	"rustdesk-api-server-pro/db"
 +
 +	"github.com/beevik/guid"
 +	"github.com/kataras/iris/v12"
 +	"github.com/kataras/iris/v12/mvc"
++	"xorm.io/xorm"
 +)
 +
 +type CadenaController struct {
@@ -72,6 +77,71 @@ index 0000000..7829c14
 +	b.Handle("POST", "/catalogs/save", "HandleSalvarCatalogo")
 +	b.Handle("POST", "/catalogs/delete", "HandleExcluirCatalogo")
 +	b.Handle("GET", "/connections/active", "HandleConexoesAtivas")
++	b.Handle("POST", "/connections/disconnect", "HandleDesconectar")
++	b.Handle("GET", "/alarms/list", "HandleAlertas")
++}
++
++// HandleDesconectar pede ao Cliente que feche a conexao (vai na resposta do proximo heartbeat, em ate ~3 s)
++func (c *CadenaController) HandleDesconectar() mvc.Result {
++	var form struct {
++		Id int `json:"id"`
++	}
++	if err := c.Ctx.ReadJSON(&form); err != nil {
++		return c.Error(nil, err.Error())
++	}
++	var a model.Audit
++	if has, _ := c.Db.ID(form.Id).Get(&a); !has || a.ClosedAt.Year() > 1970 {
++		return c.Error(nil, "ConnectionNotFound")
++	}
++	desconexao.Pedir(a.RustdeskId, a.ConnId)
++	return c.Success(nil, "DisconnectRequested")
++}
++
++// HandleAlertas: alertas de seguranca enviados pelos Clientes (POST /api/audit/alarm), do mais novo ao mais antigo
++func (c *CadenaController) HandleAlertas() mvc.Result {
++	currentPage := c.Ctx.URLParamIntDefault("current", 1)
++	pageSize := c.Ctx.URLParamIntDefault("size", 20)
++	rustdeskId := strings.TrimSpace(c.Ctx.URLParamDefault("rustdesk_id", ""))
++	query := func() *xorm.Session {
++		q := c.Db.Table(&model.Alarm{})
++		if rustdeskId != "" {
++			q.Where("rustdesk_id = ?", rustdeskId)
++		}
++		q.Desc("id")
++		return q
++	}
++	pagination := db.NewPagination(currentPage, pageSize)
++	alertas := make([]model.Alarm, 0)
++	if err := pagination.Paginate(query, &model.Alarm{}, &alertas); err != nil {
++		return c.Error(nil, err.Error())
++	}
++	nomes := map[string]string{}
++	list := make([]iris.Map, 0)
++	for _, al := range alertas {
++		nome, ok := nomes[al.RustdeskId]
++		if !ok {
++			var d model.Device
++			_, _ = c.Db.Where("rustdesk_id = ?", al.RustdeskId).Get(&d)
++			nome = d.Hostname
++			nomes[al.RustdeskId] = nome
++		}
++		list = append(list, iris.Map{
++			"id":          al.Id,
++			"rustdesk_id": al.RustdeskId,
++			"hostname":    nome,
++			"tipo":        al.Typ,
++			"ip":          al.IP,
++			"conn_id":     al.ConnId,
++			"info":        al.Info,
++			"created_at":  al.CreatedAt.Format(config.TimeFormat),
++		})
++	}
++	return c.Success(iris.Map{
++		"total":   pagination.TotalCount,
++		"records": list,
++		"current": currentPage,
++		"size":    pageSize,
++	}, "ok")
 +}
 +
 +type regraForm struct {
@@ -265,6 +335,7 @@ index 0000000..7829c14
 +			"tipo":         tipo,
 +			"inicio":       a.CreatedAt.Format(config.TimeFormat),
 +			"minutos":      int(time.Since(a.CreatedAt).Minutes()),
++			"desconectando": desconexao.Pedido(a.RustdeskId, a.ConnId),
 +		})
 +	}
 +	return c.Success(list, "ok")
@@ -721,10 +792,18 @@ index d3e61d8..4778221 100644
  		},
  	}
 diff --git a/backend/app/controller/api/audit.go b/backend/app/controller/api/audit.go
-index 70d3fe1..ca3bf49 100644
+index 70d3fe1..05f2eeb 100644
 --- a/backend/app/controller/api/audit.go
 +++ b/backend/app/controller/api/audit.go
-@@ -64,7 +64,8 @@ func (c *AuditController) PostAuditConn() mvc.Result {
+@@ -3,6 +3,7 @@ package api
+ import (
+ 	"io"
+ 	"rustdesk-api-server-pro/app/model"
++	"strings"
+ 	"time"
+ 
+ 	"github.com/kataras/iris/v12"
+@@ -64,7 +65,8 @@ func (c *AuditController) PostAuditConn() mvc.Result {
  			})
  		}
  		if action == "close" {
@@ -734,7 +813,7 @@ index 70d3fe1..ca3bf49 100644
  				ClosedAt: time.Now(),
  			})
  		}
-@@ -76,7 +77,7 @@ func (c *AuditController) PostAuditConn() mvc.Result {
+@@ -76,7 +78,7 @@ func (c *AuditController) PostAuditConn() mvc.Result {
  		t := gjson.GetBytes(body, "type").Int()
  		_type := int(t)
  		peer := peerResult.String()
@@ -743,6 +822,40 @@ index 70d3fe1..ca3bf49 100644
  			SessionId: sessionId,
  			Type:      _type,
  			Peer:      peer,
+@@ -117,10 +119,28 @@ func (c *AuditController) PostAuditFile() mvc.Result {
+ }
+ 
+ func (c *AuditController) PostAuditAlarm() mvc.Result {
+-
+-	return mvc.Response{
+-		Object: iris.Map{
+-			"error": "11",
+-		},
++	// CadenaTech: guarda o alerta (o original so devolvia erro)
++	// {"id":"500688544","uuid":"...","typ":2,"info":"{\"ip\":\"201.11.28.254\",...}","conn_id":12,"nonce":"..."}
++	body, err := io.ReadAll(c.Ctx.Request().Body)
++	if err != nil {
++		return mvc.Response{Object: iris.Map{"error": err.Error()}}
++	}
++	info := gjson.GetBytes(body, "info").String()
++	ip := gjson.Get(info, "ip").String()
++	if ip == "" {
++		ip = gjson.Get(info, "ip_addr").String()
+ 	}
++	ip = strings.TrimPrefix(ip, "::ffff:")
++	if len(ip) > 64 {
++		ip = ip[:64]
++	}
++	c.Db.Insert(&model.Alarm{
++		RustdeskId: gjson.GetBytes(body, "id").String(),
++		Uuid:       gjson.GetBytes(body, "uuid").String(),
++		Typ:        int(gjson.GetBytes(body, "typ").Int()),
++		IP:         ip,
++		ConnId:     int(gjson.GetBytes(body, "conn_id").Int()),
++		Info:       info,
++	})
++	return mvc.Response{}
+ }
 diff --git a/backend/app/controller/api/cadena_catalogo.go b/backend/app/controller/api/cadena_catalogo.go
 new file mode 100644
 index 0000000..921e25a
@@ -977,10 +1090,19 @@ index 8241a1d..f646b87 100644
  	}
  
 diff --git a/backend/app/jobs.go b/backend/app/jobs.go
-index a891945..73cf548 100644
+index a891945..3f19177 100644
 --- a/backend/app/jobs.go
 +++ b/backend/app/jobs.go
-@@ -26,7 +26,7 @@ func StartJobs(cfg *config.ServerConfig) {
+@@ -1,6 +1,8 @@
+ package app
+ 
+ import (
++	"log"
++	"rustdesk-api-server-pro/app/gravacoes"
+ 	"rustdesk-api-server-pro/app/model"
+ 	"rustdesk-api-server-pro/config"
+ 	"rustdesk-api-server-pro/db"
+@@ -26,10 +28,30 @@ func StartJobs(cfg *config.ServerConfig) {
  	}
  	s.NewJob(gocron.DurationJob(time.Duration(cfg.JobsConfig.DeviceCheckJob.Duration)*time.Second), gocron.NewTask(func() {
  		expired := carbon.Now(cfg.Db.TimeZone).SubSeconds(30).ToDateTimeString()
@@ -989,6 +1111,29 @@ index a891945..73cf548 100644
  			IsOnline: false,
  		})
  	}))
+ 
++	// CadenaTech: limpeza automatica (cadena.diasRegistros / diasGravacoes; 0 = guarda para sempre), ao iniciar e
++	// a cada 6 horas
++	s.NewJob(gocron.DurationJob(6*time.Hour), gocron.NewTask(func() {
++		registros, dias := config.DiasRetencao()
++		if registros > 0 {
++			corte := carbon.Now(cfg.Db.TimeZone).SubDays(registros).ToDateTimeString()
++			a, _ := dbEngine.Where("created_at < ?", corte).Delete(&model.Audit{})
++			f, _ := dbEngine.Where("created_at < ?", corte).Delete(&model.FileTransfer{})
++			l, _ := dbEngine.Where("created_at < ?", corte).Delete(&model.Alarm{})
++			if a+f+l > 0 {
++				log.Printf("limpeza: %d acessos, %d transferencias e %d alertas com mais de %d dias", a, f, l, registros)
++			}
++		}
++		if dias > 0 {
++			if n := gravacoes.ApagarAntigas(time.Now().AddDate(0, 0, -dias)); n > 0 {
++				log.Printf("limpeza: %d gravacoes com mais de %d dias", n, dias)
++			}
++		}
++	}), gocron.WithStartAt(gocron.WithStartImmediately()))
++
+ 	s.Start()
+ }
 diff --git a/backend/app/middleware/auth.go b/backend/app/middleware/auth.go
 index a669db8..666b4d8 100644
 --- a/backend/app/middleware/auth.go
@@ -1167,10 +1312,10 @@ index cd8b90a..64ad1f7 100644
  
 diff --git a/backend/cmd/migrar.go b/backend/cmd/migrar.go
 new file mode 100644
-index 0000000..3644a5b
+index 0000000..39338ee
 --- /dev/null
 +++ b/backend/cmd/migrar.go
-@@ -0,0 +1,156 @@
+@@ -0,0 +1,157 @@
 +package cmd
 +
 +// CadenaTech: copia todos os dados de um banco para outro (ex.: SQLite -> PostgreSQL), mantendo ids e datas.
@@ -1211,6 +1356,7 @@ index 0000000..3644a5b
 +		new(model.VerifyCode),
 +		new(model.SystemSettings),
 +		new(model.MailTemplate),
++		new(model.Alarm), // CadenaTech: alertas de seguranca
 +	}
 +}
 +
@@ -1364,10 +1510,10 @@ index 3adc23a..dcf57ca 100644
  			fmt.Println("Db init error:", err)
 diff --git a/backend/config/cadena.go b/backend/config/cadena.go
 new file mode 100644
-index 0000000..e48cd56
+index 0000000..1e8db07
 --- /dev/null
 +++ b/backend/config/cadena.go
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,157 @@
 +package config
 +
 +// CadenaTech: opcoes proprias e configuracao por variaveis de ambiente.
@@ -1379,11 +1525,14 @@ index 0000000..e48cd56
 +//   RUSTDESK_API_SIGN_KEY    chave que assina os tokens
 +//   RUSTDESK_API_GRUPO_CLIENTES  nome do grupo da aba "Grupo" do Tecnico (padrao "Clientes")
 +//   RUSTDESK_API_PASTAS_GRAVACOES  pastas das gravacoes enviadas por FTP, separadas por ";"
++//   RUSTDESK_API_DIAS_REGISTROS    dias de guarda de acessos, transferencias e alertas (0 = sempre)
++//   RUSTDESK_API_DIAS_GRAVACOES    dias de guarda das gravacoes (0 = sempre)
 +
 +import (
 +	"bufio"
 +	"os"
 +	"path"
++	"strconv"
 +	"strings"
 +	"sync"
 +)
@@ -1393,6 +1542,18 @@ index 0000000..e48cd56
 +	GrupoClientes string `yaml:"grupoClientes"`
 +	// Pastas onde chegam as gravacoes enviadas pelo Tecnico (FTP), mostradas no Registro de acessos
 +	PastasGravacoes []string `yaml:"pastasGravacoes"`
++	// Limpeza automatica: apaga registros (acessos, transferencias, alertas) e gravacoes mais velhos que estes
++	// dias. 0 (padrao) guarda para sempre
++	DiasRegistros int `yaml:"diasRegistros"`
++	DiasGravacoes int `yaml:"diasGravacoes"`
++}
++
++// DiasRetencao devolve os dias de guarda dos registros e das gravacoes (0 = sem limpeza)
++func DiasRetencao() (registros, gravacoes int) {
++	if cfg := GetServerConfig(); cfg.Cadena != nil {
++		return cfg.Cadena.DiasRegistros, cfg.Cadena.DiasGravacoes
++	}
++	return 0, 0
 +}
 +
 +// PastasGravacoes devolve as pastas das gravacoes (server.yaml ou RUSTDESK_API_PASTAS_GRAVACOES)
@@ -1471,6 +1632,19 @@ index 0000000..e48cd56
 +			cfg.Cadena = &CadenaConfig{}
 +		}
 +		cfg.Cadena.PastasGravacoes = strings.Split(v, ";")
++	}
++	for chave, destino := range map[string]func(*CadenaConfig, int){
++		"RUSTDESK_API_DIAS_REGISTROS": func(c *CadenaConfig, n int) { c.DiasRegistros = n },
++		"RUSTDESK_API_DIAS_GRAVACOES": func(c *CadenaConfig, n int) { c.DiasGravacoes = n },
++	} {
++		if v := strings.TrimSpace(os.Getenv(chave)); v != "" {
++			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
++				if cfg.Cadena == nil {
++					cfg.Cadena = &CadenaConfig{}
++				}
++				destino(cfg.Cadena, n)
++			}
++		}
 +	}
 +	cfg.Db.Driver = NormalizarDriver(cfg.Db.Driver)
 +}
@@ -2583,14 +2757,15 @@ index 0000000..d0f2ed3
 +	delete(tentativasLogin, chave)
 +}
 diff --git a/soybean-admin/src/locales/langs/en-us.ts b/soybean-admin/src/locales/langs/en-us.ts
-index 5d659c3..68b746e 100644
+index 5d659c3..1853beb 100644
 --- a/soybean-admin/src/locales/langs/en-us.ts
 +++ b/soybean-admin/src/locales/langs/en-us.ts
-@@ -166,7 +166,9 @@ const local: App.I18n.Schema = {
+@@ -166,7 +166,10 @@ const local: App.I18n.Schema = {
      system_mail: 'Mail Managment',
      audit_baselogs: 'Base Logs',
      audit_filetransferlogs: 'File Transfer Logs',
 -    devices: 'Devices'
++    audit_alarms: 'Security alerts',
 +    devices: 'Devices',
 +    connections: 'Active connections',
 +    catalogs: 'Shared address books'
@@ -2598,11 +2773,14 @@ index 5d659c3..68b746e 100644
    page: {
      login: {
 diff --git a/soybean-admin/src/router/elegant/imports.ts b/soybean-admin/src/router/elegant/imports.ts
-index 18550e7..0ac0824 100644
+index 18550e7..a546bd8 100644
 --- a/soybean-admin/src/router/elegant/imports.ts
 +++ b/soybean-admin/src/router/elegant/imports.ts
-@@ -22,6 +22,8 @@ export const views: Record<LastLevelRouteKey, RouteComponent | (() => Promise<Ro
+@@ -20,8 +20,11 @@ export const views: Record<LastLevelRouteKey, RouteComponent | (() => Promise<Ro
+   500: () => import("@/views/_builtin/500/index.vue"),
+   "iframe-page": () => import("@/views/_builtin/iframe-page/[url].vue"),
    login: () => import("@/views/_builtin/login/index.vue"),
++  audit_alarms: () => import("@/views/audit/alarms/index.vue"),
    audit_baselogs: () => import("@/views/audit/baseLogs/index.vue"),
    audit_filetransferlogs: () => import("@/views/audit/fileTransferLogs/index.vue"),
 +  catalogs: () => import("@/views/catalogs/index.vue"),
@@ -2611,10 +2789,23 @@ index 18550e7..0ac0824 100644
    home: () => import("@/views/home/index.vue"),
    system_mail_logs: () => import("@/views/system/mail_logs/index.vue"),
 diff --git a/soybean-admin/src/router/elegant/routes.ts b/soybean-admin/src/router/elegant/routes.ts
-index d96117d..99d08b2 100644
+index d96117d..c12176b 100644
 --- a/soybean-admin/src/router/elegant/routes.ts
 +++ b/soybean-admin/src/router/elegant/routes.ts
-@@ -72,6 +72,28 @@ export const generatedRoutes: GeneratedRoute[] = [
+@@ -69,9 +69,41 @@ export const generatedRoutes: GeneratedRoute[] = [
+           i18nKey: 'route.audit_filetransferlogs',
+           icon: 'solar:square-transfer-horizontal-linear'
+         }
++      },
++      {
++        name: 'audit_alarms',
++        path: '/audit/alarms',
++        component: 'view.audit_alarms',
++        meta: {
++          title: 'audit_alarms',
++          i18nKey: 'route.audit_alarms',
++          icon: 'mdi:shield-alert-outline'
++        }
        }
      ]
    },
@@ -2644,11 +2835,14 @@ index d96117d..99d08b2 100644
      name: 'devices',
      path: '/devices',
 diff --git a/soybean-admin/src/router/elegant/transform.ts b/soybean-admin/src/router/elegant/transform.ts
-index 0bf5641..4f41476 100644
+index 0bf5641..ad6bbbf 100644
 --- a/soybean-admin/src/router/elegant/transform.ts
 +++ b/soybean-admin/src/router/elegant/transform.ts
-@@ -169,6 +169,8 @@ const routeMap: RouteMap = {
+@@ -167,8 +167,11 @@ const routeMap: RouteMap = {
+   "404": "/404",
+   "500": "/500",
    "audit": "/audit",
++  "audit_alarms": "/audit/alarms",
    "audit_baselogs": "/audit/baselogs",
    "audit_filetransferlogs": "/audit/filetransferlogs",
 +  "catalogs": "/catalogs",
@@ -2658,10 +2852,10 @@ index 0bf5641..4f41476 100644
    "iframe-page": "/iframe-page/:url",
 diff --git a/soybean-admin/src/service/api/cadena.ts b/soybean-admin/src/service/api/cadena.ts
 new file mode 100644
-index 0000000..6a32e1d
+index 0000000..506aeeb
 --- /dev/null
 +++ b/soybean-admin/src/service/api/cadena.ts
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,82 @@
 +// CadenaTech: catalogos compartilhados e acessos em andamento (backend: app/controller/admin/cadena.go)
 +import { request } from '../request';
 +
@@ -2700,6 +2894,18 @@ index 0000000..6a32e1d
 +  tipo: string;
 +  inicio: string;
 +  minutos: number;
++  desconectando?: boolean;
++}
++
++export interface CadenaAlerta {
++  id: number;
++  rustdesk_id: string;
++  hostname: string;
++  tipo: number;
++  ip: string;
++  conn_id: number;
++  info: string;
++  created_at: string;
 +}
 +
 +export function fetchCatalogos() {
@@ -2721,12 +2927,26 @@ index 0000000..6a32e1d
 +export function fetchConexoesAtivas() {
 +  return request<CadenaConexao[]>({ url: '/connections/active' });
 +}
++
++export function desconectarAcesso(id: number) {
++  return request({ url: '/connections/disconnect', method: 'post', data: { id } });
++}
++
++export function fetchAlertas(params: { current: number; size: number; rustdesk_id?: string }) {
++  return request<{ total: number; records: CadenaAlerta[]; current: number; size: number }>({
++    url: '/alarms/list',
++    params
++  });
++}
 diff --git a/soybean-admin/src/typings/elegant-router.d.ts b/soybean-admin/src/typings/elegant-router.d.ts
-index 804b505..3be1ede 100644
+index 804b505..904edd7 100644
 --- a/soybean-admin/src/typings/elegant-router.d.ts
 +++ b/soybean-admin/src/typings/elegant-router.d.ts
-@@ -23,6 +23,8 @@ declare module "@elegant-router/types" {
+@@ -21,8 +21,11 @@ declare module "@elegant-router/types" {
+     "404": "/404";
+     "500": "/500";
      "audit": "/audit";
++    "audit_alarms": "/audit/alarms";
      "audit_baselogs": "/audit/baselogs";
      "audit_filetransferlogs": "/audit/filetransferlogs";
 +    "catalogs": "/catalogs";
@@ -2734,7 +2954,7 @@ index 804b505..3be1ede 100644
      "devices": "/devices";
      "home": "/home";
      "iframe-page": "/iframe-page/:url";
-@@ -69,6 +71,8 @@ declare module "@elegant-router/types" {
+@@ -69,6 +72,8 @@ declare module "@elegant-router/types" {
      | "404"
      | "500"
      | "audit"
@@ -2743,8 +2963,11 @@ index 804b505..3be1ede 100644
      | "devices"
      | "home"
      | "iframe-page"
-@@ -98,6 +102,8 @@ declare module "@elegant-router/types" {
+@@ -96,8 +101,11 @@ declare module "@elegant-router/types" {
+     | "500"
+     | "iframe-page"
      | "login"
++    | "audit_alarms"
      | "audit_baselogs"
      | "audit_filetransferlogs"
 +    | "catalogs"
@@ -2970,18 +3193,18 @@ index 0000000..b64cc9d
 +</template>
 diff --git a/soybean-admin/src/views/connections/index.vue b/soybean-admin/src/views/connections/index.vue
 new file mode 100644
-index 0000000..48df1a8
+index 0000000..222bf7e
 --- /dev/null
 +++ b/soybean-admin/src/views/connections/index.vue
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,121 @@
 +<script setup lang="tsx">
 +// CadenaTech: acessos em andamento, a partir da auditoria que o Cliente envia (abertura e fechamento de cada
 +// conexao). Atualiza sozinha a cada 15 segundos.
 +import { onMounted, onUnmounted, ref } from 'vue';
-+import { NTag } from 'naive-ui';
++import { NButton, NPopconfirm, NTag } from 'naive-ui';
 +import type { DataTableColumns } from 'naive-ui';
 +import { $t } from '@/locales';
-+import { fetchConexoesAtivas, type CadenaConexao } from '@/service/api/cadena';
++import { desconectarAcesso, fetchConexoesAtivas, type CadenaConexao } from '@/service/api/cadena';
 +
 +defineOptions({ name: 'CadenaConexoes' });
 +
@@ -3028,8 +3251,43 @@ index 0000000..48df1a8
 +  },
 +  { key: 'inicio', title: 'Início', align: 'center', minWidth: 160 },
 +  { key: 'minutos', title: 'Duração', align: 'center', minWidth: 100, render: row => duracao(row.minutos) },
-+  { key: 'ip', title: 'IP do técnico', align: 'center', minWidth: 130 }
++  { key: 'ip', title: 'IP do técnico', align: 'center', minWidth: 130 },
++  {
++    key: 'acoes',
++    title: $t('common.action'),
++    align: 'center',
++    width: 150,
++    render: row =>
++      row.desconectando ? (
++        <NTag type="warning">Desconectando…</NTag>
++      ) : (
++        <NPopconfirm
++          negativeText={$t('common.cancel')}
++          positiveText={$t('common.confirm')}
++          onPositiveClick={() => desconectar(row)}
++        >
++          {{
++            default: () => 'Derrubar este acesso? O técnico é desconectado na hora.',
++            trigger: () => (
++              <NButton size="small" type="error" ghost>
++                Desconectar
++              </NButton>
++            )
++          }}
++        </NPopconfirm>
++      )
++  }
 +];
++
++// O pedido vai na resposta do proximo heartbeat do Cliente (a cada ~3 s durante um acesso)
++async function desconectar(row: CadenaConexao) {
++  const res = await desconectarAcesso(row.id);
++  if (!res.error) {
++    window.$message?.success('Pedido enviado. O acesso cai em alguns segundos.');
++    row.desconectando = true;
++    setTimeout(carregar, 6000);
++  }
++}
 +
 +onMounted(() => {
 +  carregar();
@@ -3054,9 +3312,9 @@ index 0000000..48df1a8
 +    </template>
 +    <p class="pb-12px text-13px opacity-80">
 +      Conexões abertas nos computadores dos clientes nas últimas 12 horas. Uma conexão some daqui quando o técnico
-+      desconecta.
++      desconecta. "Desconectar" derruba o acesso pelo próprio computador do cliente, em alguns segundos.
 +    </p>
-+    <NDataTable :columns="colunas" :data="lista" :loading="carregando" size="small" :row-key="row => row.id" :scroll-x="1150" />
++    <NDataTable :columns="colunas" :data="lista" :loading="carregando" size="small" :row-key="row => row.id" :scroll-x="1300" />
 +    <NEmpty v-if="!carregando && lista.length === 0" description="Nenhum acesso em andamento" class="pt-24px" />
 +  </NCard>
 +</template>
@@ -3278,10 +3536,10 @@ index 1513bc1..82f2746 100644
      type AuditLogSearchParams = CommonType.RecordNullable<
 diff --git a/backend/app/gravacoes/gravacoes.go b/backend/app/gravacoes/gravacoes.go
 new file mode 100644
-index 0000000..a5abaf1
+index 0000000..2d02a4e
 --- /dev/null
 +++ b/backend/app/gravacoes/gravacoes.go
-@@ -0,0 +1,178 @@
+@@ -0,0 +1,190 @@
 +package gravacoes
 +
 +// CadenaTech: gravacoes dos acessos, enviadas pelo Tecnico ao FTP da empresa (cadena_ftp.rs), mostradas no
@@ -3332,6 +3590,18 @@ index 0000000..a5abaf1
 +	Tecnico    string
 +	RustdeskId string
 +	Tela       string
++}
++
++// ApagarAntigas remove as gravacoes que comecaram antes de "antes" (so arquivos com o nome no padrao das
++// gravacoes, nas pastas configuradas). Devolve quantas apagou
++func ApagarAntigas(antes time.Time) int {
++	n := 0
++	for _, g := range Listar() {
++		if g.Inicio.Before(antes) && os.Remove(g.Caminho) == nil {
++			n++
++		}
++	}
++	return n
 +}
 +
 +// Listar le as pastas configuradas. Um nome que nao segue o padrao e ignorado
@@ -3460,3 +3730,270 @@ index 0000000..a5abaf1
 +	}
 +	ctx.StopWithStatus(http.StatusNotFound)
 +}
+diff --git a/backend/app/desconexao/desconexao.go b/backend/app/desconexao/desconexao.go
+new file mode 100644
+index 0000000..3af7581
+--- /dev/null
++++ b/backend/app/desconexao/desconexao.go
+@@ -0,0 +1,61 @@
++package desconexao
++
++// CadenaTech: derrubar um acesso pelo painel. O Cliente manda o heartbeat com as conexoes abertas ("conns") e,
++// se a resposta trouxer "disconnect": [conn_id, ...], fecha essas conexoes (hbbs_http/sync.rs do RustDesk).
++// O pedido fica guardado em memoria ate o Cliente confirmar (a conexao some do "conns") ou vencer o prazo.
++
++import (
++	"sync"
++	"time"
++)
++
++const prazo = 5 * time.Minute
++
++var (
++	mu      sync.Mutex
++	pedidos = map[string]map[int]time.Time{} // rustdesk_id -> conn_id -> quando foi pedido
++)
++
++// Pedir agenda o fechamento da conexao connId do computador rustdeskId
++func Pedir(rustdeskId string, connId int) {
++	mu.Lock()
++	defer mu.Unlock()
++	if pedidos[rustdeskId] == nil {
++		pedidos[rustdeskId] = map[int]time.Time{}
++	}
++	pedidos[rustdeskId][connId] = time.Now()
++}
++
++// Pendentes devolve as conexoes a fechar entre as que o Cliente ainda tem abertas. O que ja fechou ou venceu sai
++func Pendentes(rustdeskId string, abertas []int) []int {
++	mu.Lock()
++	defer mu.Unlock()
++	lista := pedidos[rustdeskId]
++	if len(lista) == 0 {
++		return nil
++	}
++	aberta := make(map[int]bool, len(abertas))
++	for _, c := range abertas {
++		aberta[c] = true
++	}
++	r := make([]int, 0)
++	for c, quando := range lista {
++		if !aberta[c] || time.Since(quando) > prazo {
++			delete(lista, c)
++			continue
++		}
++		r = append(r, c)
++	}
++	if len(lista) == 0 {
++		delete(pedidos, rustdeskId)
++	}
++	return r
++}
++
++// Pedido diz se ha um pedido de fechamento ainda valido para a conexao (para o painel mostrar "desconectando")
++func Pedido(rustdeskId string, connId int) bool {
++	mu.Lock()
++	defer mu.Unlock()
++	quando, ok := pedidos[rustdeskId][connId]
++	return ok && time.Since(quando) <= prazo
++}
+diff --git a/backend/app/model/alarm.go b/backend/app/model/alarm.go
+new file mode 100644
+index 0000000..54955fc
+--- /dev/null
++++ b/backend/app/model/alarm.go
+@@ -0,0 +1,22 @@
++package model
++
++import "time"
++
++// CadenaTech: alerta de seguranca enviado pelo Cliente (POST /api/audit/alarm). Tipos (AlarmAuditType do RustDesk):
++// 0 IP fora da lista permitida, 1 mais de 30 tentativas de senha, 2 seis tentativas em um minuto,
++// 6 tentativas demais do mesmo prefixo IPv6, 7/8 login do sistema no terminal, 9 acao fora do escopo da sessao,
++// 10 ID fora da lista permitida
++type Alarm struct {
++	Id         int       `xorm:"'id' int notnull pk autoincr"`
++	RustdeskId string    `xorm:"'rustdesk_id' varchar(100) index"`
++	Uuid       string    `xorm:"'uuid' varchar(255)"`
++	Typ        int       `xorm:"'typ' int"`
++	IP         string    `xorm:"'ip' varchar(64)"`
++	ConnId     int       `xorm:"'conn_id' int"`
++	Info       string    `xorm:"'info' text"`
++	CreatedAt  time.Time `xorm:"'created_at' datetime created index"`
++}
++
++func (m *Alarm) TableName() string {
++	return "alarm"
++}
+diff --git a/backend/app/controller/api/system.go b/backend/app/controller/api/system.go
+index 6ec7fa6..93b4eaa 100644
+--- a/backend/app/controller/api/system.go
++++ b/backend/app/controller/api/system.go
+@@ -1,6 +1,7 @@
+ package api
+ 
+ import (
++	"rustdesk-api-server-pro/app/desconexao"
+ 	"rustdesk-api-server-pro/app/form/api"
+ 	"rustdesk-api-server-pro/app/model"
+ 	versionhelper "rustdesk-api-server-pro/helper/version"
+@@ -89,12 +90,16 @@ func (c *SystemController) PostHeartbeat() mvc.Result {
+ 		}
+ 	}
+ 
++	resposta := iris.Map{
++		"modified_at": time.Now().Unix(),
++		"strategy":    versionhelper.ResolveCapability(NormalizeReportedVersion(form.Version, form.Ver)),
++	}
++	// CadenaTech: conexoes que o painel mandou derrubar (Acessos agora > Desconectar)
++	if fechar := desconexao.Pendentes(form.RustdeskId, form.Conns); len(fechar) > 0 {
++		resposta["disconnect"] = fechar
++	}
+ 	return mvc.Response{
+-		Object: iris.Map{
+-			"modified_at": time.Now().Unix(),
+-			"strategy":    versionhelper.ResolveCapability(NormalizeReportedVersion(form.Version, form.Ver)),
+-			//"disconnect":  0,
+-		},
++		Object: resposta,
+ 	}
+ }
+ 
+diff --git a/soybean-admin/src/views/audit/alarms/index.vue b/soybean-admin/src/views/audit/alarms/index.vue
+new file mode 100644
+index 0000000..4da439d
+--- /dev/null
++++ b/soybean-admin/src/views/audit/alarms/index.vue
+@@ -0,0 +1,132 @@
++<script setup lang="tsx">
++// CadenaTech: alertas de seguranca que os Clientes enviam (POST /api/audit/alarm): senha errada repetida, IP ou ID
++// fora da lista permitida etc.
++import { onMounted, reactive, ref } from 'vue';
++import { NTag } from 'naive-ui';
++import type { DataTableColumns, PaginationProps } from 'naive-ui';
++import { fetchAlertas, type CadenaAlerta } from '@/service/api/cadena';
++
++defineOptions({ name: 'CadenaAlertas' });
++
++// AlarmAuditType do RustDesk (src/server/connection.rs)
++const tipos: Record<number, { nome: string; cor: 'error' | 'warning' | 'info' }> = {
++  0: { nome: 'IP fora da lista permitida', cor: 'warning' },
++  1: { nome: 'Mais de 30 tentativas de senha', cor: 'error' },
++  2: { nome: '6 senhas erradas em 1 minuto', cor: 'error' },
++  6: { nome: 'Tentativas demais do mesmo IPv6', cor: 'error' },
++  7: { nome: 'Login do sistema bloqueado por tentativas', cor: 'warning' },
++  8: { nome: 'Logins do sistema simultâneos', cor: 'warning' },
++  9: { nome: 'Ação fora do permitido na sessão', cor: 'warning' },
++  10: { nome: 'ID fora da lista permitida', cor: 'warning' }
++};
++
++const lista = ref<CadenaAlerta[]>([]);
++const carregando = ref(false);
++const filtro = ref('');
++const paginacao = reactive<PaginationProps>({
++  page: 1,
++  pageSize: 20,
++  itemCount: 0,
++  showSizePicker: true,
++  pageSizes: [20, 50, 100],
++  prefix: ({ itemCount }) => `Total de ${itemCount} alertas`,
++  onUpdatePage: (p: number) => {
++    paginacao.page = p;
++    carregar();
++  },
++  onUpdatePageSize: (s: number) => {
++    paginacao.pageSize = s;
++    paginacao.page = 1;
++    carregar();
++  }
++});
++
++async function carregar() {
++  carregando.value = true;
++  const res = await fetchAlertas({
++    current: paginacao.page || 1,
++    size: paginacao.pageSize || 20,
++    rustdesk_id: filtro.value.trim() || undefined
++  });
++  if (!res.error && res.data) {
++    lista.value = res.data.records || [];
++    paginacao.itemCount = res.data.total;
++  }
++  carregando.value = false;
++}
++
++function pesquisar() {
++  paginacao.page = 1;
++  carregar();
++}
++
++// O "info" vem em JSON do Cliente; mostra os campos de um jeito legivel
++function detalhes(info: string) {
++  try {
++    const obj = JSON.parse(info);
++    if (obj && typeof obj === 'object') {
++      return Object.entries(obj)
++        .filter(([, v]) => v !== '' && v !== null && v !== undefined)
++        .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
++        .join(' · ');
++    }
++  } catch {
++    // texto simples
++  }
++  return info || '—';
++}
++
++const colunas: DataTableColumns<CadenaAlerta> = [
++  { key: 'created_at', title: 'Quando', align: 'center', width: 170 },
++  {
++    key: 'tipo',
++    title: 'Alerta',
++    minWidth: 230,
++    render: row => {
++      const t = tipos[row.tipo] || { nome: `Tipo ${row.tipo}`, cor: 'info' as const };
++      return <NTag type={t.cor}>{t.nome}</NTag>;
++    }
++  },
++  {
++    key: 'computador',
++    title: 'Computador do cliente',
++    minWidth: 220,
++    render: row => `${row.hostname || 'sem nome'} — ID ${row.rustdesk_id}`
++  },
++  { key: 'ip', title: 'IP de origem', align: 'center', width: 150, render: row => row.ip || '—' },
++  { key: 'info', title: 'Detalhes', minWidth: 300, ellipsis: { tooltip: true }, render: row => detalhes(row.info) }
++];
++
++onMounted(carregar);
++</script>
++
++<template>
++  <NCard :bordered="false" size="small" class="card-wrapper">
++    <template #header>Alertas de segurança</template>
++    <template #header-extra>
++      <NSpace align="center" wrap justify="end">
++        <NInput v-model:value="filtro" size="small" clearable placeholder="ID do computador" class="w-180px" @keyup.enter="pesquisar" @clear="pesquisar" />
++        <NButton size="small" @click="pesquisar">
++          <template #icon>
++            <icon-mdi-refresh class="text-icon" :class="{ 'animate-spin': carregando }" />
++          </template>
++          {{ $t('common.refresh') }}
++        </NButton>
++      </NSpace>
++    </template>
++    <p class="pb-12px text-13px opacity-80">
++      Avisos enviados pelos computadores dos clientes: tentativas de senha erradas, acesso de IP ou ID fora da lista
++      permitida e ações bloqueadas durante a sessão. Muitos alertas seguidos do mesmo IP indicam tentativa de invasão.
++    </p>
++    <NDataTable
++      :columns="colunas"
++      :data="lista"
++      :loading="carregando"
++      :pagination="paginacao"
++      remote
++      size="small"
++      :row-key="row => row.id"
++      :scroll-x="1100"
++    />
++  </NCard>
++</template>

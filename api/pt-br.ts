@@ -168,6 +168,7 @@ const local: App.I18n.Schema = {
     system_mail: 'E-mail',
     audit_baselogs: 'Registro de acessos',
     audit_filetransferlogs: 'Transferências de arquivos',
+    audit_alarms: 'Alertas de segurança',
     devices: 'Dispositivos',
     catalogs: 'Catálogos compartilhados',
     connections: 'Acessos agora'
@@ -377,7 +378,9 @@ const local: App.I18n.Schema = {
     CatalogRuleInvalid: 'Permissão inválida',
     CatalogNotFound: 'Catálogo não encontrado',
     CatalogSaved: 'Catálogo salvo',
-    CatalogDeleted: 'Catálogo excluído'
+    CatalogDeleted: 'Catálogo excluído',
+    ConnectionNotFound: 'Acesso não encontrado ou já encerrado',
+    DisconnectRequested: 'Pedido de desconexão enviado'
   }
 };
 
