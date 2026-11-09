@@ -169,6 +169,7 @@ const local: App.I18n.Schema = {
     audit_baselogs: 'Registro de acessos',
     audit_filetransferlogs: 'Transferências de arquivos',
     audit_alarms: 'Alertas de segurança',
+    audit_console: 'Ações no painel',
     devices: 'Dispositivos',
     catalogs: 'Catálogos compartilhados',
     connections: 'Acessos agora'
@@ -380,7 +381,10 @@ const local: App.I18n.Schema = {
     CatalogSaved: 'Catálogo salvo',
     CatalogDeleted: 'Catálogo excluído',
     ConnectionNotFound: 'Acesso não encontrado ou já encerrado',
-    DisconnectRequested: 'Pedido de desconexão enviado'
+    DisconnectRequested: 'Pedido de desconexão enviado',
+    TfaRequired: 'Informe o código de 6 dígitos do autenticador (2FA) e o código da imagem de novo',
+    TfaCodeError: 'Código do autenticador (2FA) incorreto',
+    NoPermission: 'Seu usuário não tem permissão para isso'
   }
 };
 

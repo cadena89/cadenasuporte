@@ -127,8 +127,114 @@ class _CadenaLateralState extends State<CadenaLateral> {
     }
   }
 
+  /// Janela estreita: so os icones, com dica ao passar o mouse, e o avatar com a bolinha de status
+  Widget _compacta(BuildContext context) {
+    Widget botao(IconData icone, String dica, bool ativo, VoidCallback onTap) =>
+        Tooltip(
+          message: dica,
+          preferBelow: false,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              width: 44,
+              height: 42,
+              margin: const EdgeInsets.only(bottom: 4),
+              decoration: BoxDecoration(
+                color: ativo
+                    ? MyTheme.accent.withOpacity(0.12)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icone,
+                  size: 21, color: ativo ? MyTheme.accent : _suave(context)),
+            ),
+          ),
+        );
+    return Container(
+      width: 68,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.background,
+        border: Border(right: BorderSide(color: _linha(context))),
+      ),
+      padding: const EdgeInsets.fromLTRB(0, 16, 0, 12),
+      child: Column(children: [
+        Tooltip(
+          message: cadenaNomeExibido(),
+          child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SvgPicture.asset('assets/icon.svg', width: 38, height: 38)),
+        ),
+        Divider(height: 1, color: _linha(context)).paddingSymmetric(
+            horizontal: 12, vertical: 14),
+        Obx(() {
+          final visiveis = _CadenaEstado.visiveis.toList();
+          final aba = _CadenaEstado.aba.value;
+          return Column(children: [
+            for (final s in _secoes)
+              if (visiveis.contains(s.$1.index))
+                botao(
+                    s.$3,
+                    _contagem(s.$1) == null
+                        ? s.$2
+                        : '${s.$2} (${_contagem(s.$1)})',
+                    aba == s.$1.index,
+                    () => _abrir(s.$1)),
+            botao(Icons.settings_outlined, 'Configurações', false,
+                _configuracoes),
+          ]);
+        }),
+        const Spacer(),
+        Obx(() {
+          final logado = gFFI.userModel.isLogin;
+          final nome = gFFI.userModel.displayNameOrUserName;
+          final serv = _servidores.value;
+          final semServidor = serv != null && serv.isEmpty;
+          final dica = [
+            logado ? nome : 'Sem login: clique para entrar',
+            'Servidores: ${serv == null ? 'verificando' : (serv.isEmpty ? 'nenhum responde' : serv)}',
+            if (_ftp.value.isNotEmpty) 'Gravações: ${_ftp.value}',
+          ].join('\n');
+          return Tooltip(
+            message: dica,
+            preferBelow: false,
+            child: InkWell(
+              onTap: logado ? null : () => loginDialog(),
+              customBorder: const CircleBorder(),
+              child: Stack(children: [
+                CircleAvatar(
+                  radius: 19,
+                  backgroundColor: MyTheme.accent,
+                  child: Text(_iniciais(logado ? nome : '?'),
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w600)),
+                ),
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    width: 11,
+                    height: 11,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: semServidor ? Colors.red : Colors.green,
+                      border: Border.all(
+                          color: Theme.of(context).colorScheme.background,
+                          width: 2),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          );
+        }),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (MediaQuery.of(context).size.width < 1000) return _compacta(context);
     final cor = MyTheme.accent;
     return Container(
       width: 252,
@@ -470,7 +576,7 @@ class _CadenaTopoState extends State<CadenaTopo> {
   @override
   Widget build(BuildContext context) {
     final campoId = Obx(() => Container(
-          constraints: const BoxConstraints(maxWidth: 520, minWidth: 300),
+          constraints: const BoxConstraints(maxWidth: 540),
           padding: const EdgeInsets.all(4),
           decoration: _caixa(context, ativo: _focado.value),
           child: Row(children: [
@@ -570,22 +676,30 @@ class _CadenaTopoState extends State<CadenaTopo> {
         color: Theme.of(context).cardColor,
         border: Border(bottom: BorderSide(color: _linha(context))),
       ),
-      child: Obx(() => Row(
+      // Janela estreita: o campo de ID sempre fica; a busca sai antes, depois ordenar e atualizar
+      child: LayoutBuilder(builder: (context, limites) {
+        final largura = limites.maxWidth;
+        final comBusca = largura >= 820;
+        final comExtras = largura >= 600;
+        return Obx(() => Row(
             children: [
-              Flexible(
+              Expanded(
                 flex: 5,
-                child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 540),
-                    child: campoId),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: campoId,
+                ),
               ),
-              const SizedBox(width: 10),
-              Flexible(
-                flex: 3,
-                child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 320),
-                    child: busca),
-              ),
-              const SizedBox(width: 10),
+              if (comBusca) const SizedBox(width: 10),
+              if (comBusca)
+                Expanded(
+                  flex: 3,
+                  child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 320),
+                      child: busca),
+                ),
+              const SizedBox(width: 4),
+              if (comExtras)
               _botaoIcone(context,
                   icone: Icons.swap_vert,
                   dica: peerSort.value == PeerSortType.status
@@ -603,13 +717,15 @@ class _CadenaTopoState extends State<CadenaTopo> {
                   dica: 'Lista',
                   ativo: peerCardUiType.value != PeerUiType.grid,
                   onTap: () => _mudarVisao(PeerUiType.list)),
+              if (comExtras)
               _botaoIcone(context,
                   icone: Icons.refresh,
                   dica: translate('Refresh'),
                   ativo: false,
                   onTap: () => cadenaRecarregarAba?.call()),
             ],
-          )),
+          ));
+      }),
     );
   }
 }

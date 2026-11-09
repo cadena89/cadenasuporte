@@ -52,7 +52,7 @@ jobs:
       CADENA_NUMERO: ${{ inputs.numero || '1' }}
       VCPKG_DEFAULT_BINARY_CACHE: C:\cb\vcpkg-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Conferir a configuracao
         shell: powershell
@@ -69,7 +69,7 @@ jobs:
 
       # Rust, cargo-expand/flutter_rust_bridge_codegen e os pacotes ja compilados do vcpkg
       - name: Cache das ferramentas
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             C:\cb\ferramentas\rustup
@@ -95,7 +95,7 @@ jobs:
 
       - name: Enviar os executaveis (sem assinatura)
         id: envio
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: windows-nao-assinado
           path: |
@@ -104,7 +104,7 @@ jobs:
           if-no-files-found: error
 
       - name: Fonte correspondente (AGPL) e atalhos do tecnico
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: fonte-e-atalhos
           path: |
@@ -127,7 +127,7 @@ jobs:
 
       - name: Enviar os executaveis assinados
         if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: windows-assinado
           path: C:/cb/assinado/

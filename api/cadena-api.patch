@@ -1,8 +1,28 @@
 diff --git a/backend/app/controller/admin/auth.go b/backend/app/controller/admin/auth.go
-index 3178ec3..7a3d61c 100644
+index 3178ec3..e892241 100644
 --- a/backend/app/controller/admin/auth.go
 +++ b/backend/app/controller/admin/auth.go
-@@ -30,22 +30,31 @@ func (c *AuthController) PostAuthLogin() mvc.Result {
+@@ -2,16 +2,19 @@ package admin
+ 
+ import (
+ 	"os"
++	"rustdesk-api-server-pro/app/acoes"
+ 	"rustdesk-api-server-pro/app/form/admin"
+ 	"rustdesk-api-server-pro/app/model"
+ 	"rustdesk-api-server-pro/config"
+ 	"rustdesk-api-server-pro/helper/captcha"
+ 	"rustdesk-api-server-pro/util"
+ 	"strconv"
++	"strings"
+ 	"time"
+ 
+ 	"github.com/kataras/iris/v12"
+ 	"github.com/kataras/iris/v12/mvc"
++	"github.com/pquerna/otp/totp"
+ )
+ 
+ type AuthController struct {
+@@ -30,22 +33,53 @@ func (c *AuthController) PostAuthLogin() mvc.Result {
  		return c.Error(nil, "CaptchaError")
  	}
  
@@ -12,23 +32,45 @@ index 3178ec3..7a3d61c 100644
 +		return c.Error(nil, "LoginBlocked")
 +	}
 +
++	// CadenaTech: cada tentativa de entrar vai para o registro de acoes do painel
++	registrar := func(userId int, ok bool, resultado string) {
++		acoes.Registrar(c.Db, userId, loginForm.Username, acoes.IP(c.Ctx), "/admin/auth/login",
++			acoes.Nome("/admin/auth/login"), "", "", ok, resultado)
++	}
++
  	var user model.User
 -	get, err := c.Db.Where("username = ? and is_admin = 1", loginForm.Username).Get(&user)
-+	get, err := c.Db.Where("username = ? and is_admin = ?", loginForm.Username, true).Get(&user)
++	// CadenaTech: administradores e auditores (o auditor so le; ver middleware.permitidoAuditor)
++	get, err := c.Db.Where("username = ? and status > 0 and (is_admin = ? or auditor = ?)", loginForm.Username, true, true).Get(&user)
  	if err != nil {
  		return c.Error(nil, err.Error())
  	}
  
  	if !get {
 +		util.RegistrarFalhaLogin(chave)
++		registrar(0, false, "UserNotExists")
  		return c.Error(nil, "UserNotExists")
  	}
  
  	if !util.PasswordVerify(loginForm.Password, user.Password) {
 +		util.RegistrarFalhaLogin(chave)
++		registrar(user.Id, false, "UsernameOrPasswordError")
  		return c.Error(nil, "UsernameOrPasswordError")
  	}
++	// CadenaTech: 2FA no painel. Quem tem "2FA" (tfa_check) na verificacao de login precisa do codigo do autenticador
++	if user.LoginVerify == model.LOGIN_TFA_CHECK && user.TwoFactorAuthSecret != "" {
++		codigo := strings.ReplaceAll(strings.TrimSpace(loginForm.TfaCode), " ", "")
++		if codigo == "" {
++			return c.Error(nil, "TfaRequired")
++		}
++		if !totp.Validate(codigo, user.TwoFactorAuthSecret) {
++			util.RegistrarFalhaLogin(chave)
++			registrar(user.Id, false, "TfaCodeError")
++			return c.Error(nil, "TfaCodeError")
++		}
++	}
 +	util.LimparFalhasLogin(chave)
++	registrar(user.Id, true, "ok")
  
  	// make other tokens expired
 -	_, _ = c.Db.Where("user_id = ? and status = 1 and is_admin = 1", user.Id).Cols("status").Update(&model.AuthToken{
@@ -38,10 +80,10 @@ index 3178ec3..7a3d61c 100644
  
 diff --git a/backend/app/controller/admin/cadena.go b/backend/app/controller/admin/cadena.go
 new file mode 100644
-index 0000000..4b4d9e1
+index 0000000..b79596a
 --- /dev/null
 +++ b/backend/app/controller/admin/cadena.go
-@@ -0,0 +1,298 @@
+@@ -0,0 +1,340 @@
 +package admin
 +
 +// CadenaTech: telas do painel acrescentadas pelo CadenaTech.
@@ -79,6 +121,48 @@ index 0000000..4b4d9e1
 +	b.Handle("GET", "/connections/active", "HandleConexoesAtivas")
 +	b.Handle("POST", "/connections/disconnect", "HandleDesconectar")
 +	b.Handle("GET", "/alarms/list", "HandleAlertas")
++	b.Handle("GET", "/console/list", "HandleAcoesPainel")
++}
++
++// HandleAcoesPainel: registro das acoes do painel (console_audit), do mais novo ao mais antigo
++func (c *CadenaController) HandleAcoesPainel() mvc.Result {
++	currentPage := c.Ctx.URLParamIntDefault("current", 1)
++	pageSize := c.Ctx.URLParamIntDefault("size", 20)
++	usuario := strings.TrimSpace(c.Ctx.URLParamDefault("usuario", ""))
++	query := func() *xorm.Session {
++		q := c.Db.Table(&model.ConsoleAudit{})
++		if usuario != "" {
++			q.Where("usuario = ?", usuario)
++		}
++		q.Desc("id")
++		return q
++	}
++	pagination := db.NewPagination(currentPage, pageSize)
++	registros := make([]model.ConsoleAudit, 0)
++	if err := pagination.Paginate(query, &model.ConsoleAudit{}, &registros); err != nil {
++		return c.Error(nil, err.Error())
++	}
++	list := make([]iris.Map, 0)
++	for _, r := range registros {
++		list = append(list, iris.Map{
++			"id":         r.Id,
++			"usuario":    r.Usuario,
++			"acao":       r.Acao,
++			"rota":       r.Rota,
++			"alvo":       r.Alvo,
++			"ip":         r.IP,
++			"sucesso":    r.Sucesso,
++			"resultado":  r.Resultado,
++			"detalhes":   r.Detalhes,
++			"created_at": r.CreatedAt.Format(config.TimeFormat),
++		})
++	}
++	return c.Success(iris.Map{
++		"total":   pagination.TotalCount,
++		"records": list,
++		"current": currentPage,
++		"size":    pageSize,
++	}, "ok")
 +}
 +
 +// HandleDesconectar pede ao Cliente que feche a conexao (vai na resposta do proximo heartbeat, em ate ~3 s)
@@ -517,7 +601,7 @@ index 9421604..27b2072 100644
  		q.Desc("auth_token.id")
  		return q
 diff --git a/backend/app/controller/admin/users.go b/backend/app/controller/admin/users.go
-index 541613b..9c08e2b 100644
+index 541613b..bf3f2cd 100644
 --- a/backend/app/controller/admin/users.go
 +++ b/backend/app/controller/admin/users.go
 @@ -49,7 +49,7 @@ func (c *UsersController) HandleList() mvc.Result {
@@ -529,6 +613,39 @@ index 541613b..9c08e2b 100644
  		}
  		if status != "" {
  			q.Where("status = ?", status)
+@@ -81,6 +81,7 @@ func (c *UsersController) HandleList() mvc.Result {
+ 			"tfa_secret":       u.TwoFactorAuthSecret,
+ 			"status":           u.Status,
+ 			"is_admin":         u.IsAdmin,
++			"auditor":          u.Auditor,
+ 			"created_at":       u.CreatedAt.Format(config.TimeFormat),
+ 		})
+ 	}
+@@ -134,6 +135,7 @@ func (c *UsersController) HandleAdd() mvc.Result {
+ 		LoginVerify:     form.LoginVerify,
+ 		Status:          form.Status,
+ 		IsAdmin:         form.IsAdmin,
++		Auditor:         form.Auditor && !form.IsAdmin,
+ 	}
+ 
+ 	// 要绑定2fa
+@@ -187,6 +189,7 @@ func (c *UsersController) HandleEdit() mvc.Result {
+ 		LoginVerify:     form.LoginVerify,
+ 		Status:          form.Status,
+ 		IsAdmin:         form.IsAdmin,
++		Auditor:         form.Auditor && !form.IsAdmin,
+ 	}
+ 
+ 	if p != "" {
+@@ -207,7 +210,7 @@ func (c *UsersController) HandleEdit() mvc.Result {
+ 		newUser.TwoFactorAuthSecret = form.TwoFactorAuthSecret
+ 	}
+ 
+-	_, err = c.Db.Where("id = ?", form.Id).MustCols("licensed_devices", "status", "is_admin").Update(newUser)
++	_, err = c.Db.Where("id = ?", form.Id).MustCols("licensed_devices", "status", "is_admin", "auditor").Update(newUser)
+ 	if err != nil {
+ 		return c.Error(nil, err.Error())
+ 	}
 diff --git a/backend/app/controller/api/ab_peer.go b/backend/app/controller/api/ab_peer.go
 index e185f5a..8a85ca1 100644
 --- a/backend/app/controller/api/ab_peer.go
@@ -913,7 +1030,7 @@ index 0000000..921e25a
 +	return nil
 +}
 diff --git a/backend/app/controller/api/login.go b/backend/app/controller/api/login.go
-index 926ed0e..d2b39ba 100644
+index 926ed0e..f87c4bf 100644
 --- a/backend/app/controller/api/login.go
 +++ b/backend/app/controller/api/login.go
 @@ -4,6 +4,7 @@ import (
@@ -971,6 +1088,17 @@ index 926ed0e..d2b39ba 100644
  	return mvc.Response{
  		Object: result,
  	}
+@@ -72,5 +82,9 @@ func (c *LoginController) HandleLoginOptions() mvc.Result {
+ 	//return mvc.Response{
+ 	//	Object: oidc,
+ 	//}
+-	return mvc.Response{}
++	// CadenaTech: lista vazia em JSON. A resposta sem corpo fazia o Tecnico mostrar "FormatException" e "Tentar
++	// novamente" na tela de login
++	return mvc.Response{
++		Object: []string{},
++	}
+ }
 diff --git a/backend/app/controller/api/peer.go b/backend/app/controller/api/peer.go
 index 1f6a795..4ad6fc0 100644
 --- a/backend/app/controller/api/peer.go
@@ -1090,7 +1218,7 @@ index 8241a1d..f646b87 100644
  	}
  
 diff --git a/backend/app/jobs.go b/backend/app/jobs.go
-index a891945..3f19177 100644
+index a891945..73467c4 100644
 --- a/backend/app/jobs.go
 +++ b/backend/app/jobs.go
 @@ -1,6 +1,8 @@
@@ -1102,7 +1230,7 @@ index a891945..3f19177 100644
  	"rustdesk-api-server-pro/app/model"
  	"rustdesk-api-server-pro/config"
  	"rustdesk-api-server-pro/db"
-@@ -26,10 +28,30 @@ func StartJobs(cfg *config.ServerConfig) {
+@@ -26,10 +28,32 @@ func StartJobs(cfg *config.ServerConfig) {
  	}
  	s.NewJob(gocron.DurationJob(time.Duration(cfg.JobsConfig.DeviceCheckJob.Duration)*time.Second), gocron.NewTask(func() {
  		expired := carbon.Now(cfg.Db.TimeZone).SubSeconds(30).ToDateTimeString()
@@ -1121,8 +1249,10 @@ index a891945..3f19177 100644
 +			a, _ := dbEngine.Where("created_at < ?", corte).Delete(&model.Audit{})
 +			f, _ := dbEngine.Where("created_at < ?", corte).Delete(&model.FileTransfer{})
 +			l, _ := dbEngine.Where("created_at < ?", corte).Delete(&model.Alarm{})
-+			if a+f+l > 0 {
-+				log.Printf("limpeza: %d acessos, %d transferencias e %d alertas com mais de %d dias", a, f, l, registros)
++			p, _ := dbEngine.Where("created_at < ?", corte).Delete(&model.ConsoleAudit{})
++			if a+f+l+p > 0 {
++				log.Printf("limpeza: %d acessos, %d transferencias, %d alertas e %d acoes do painel com mais de %d dias",
++					a, f, l, p, registros)
 +			}
 +		}
 +		if dias > 0 {
@@ -1135,10 +1265,18 @@ index a891945..3f19177 100644
  	s.Start()
  }
 diff --git a/backend/app/middleware/auth.go b/backend/app/middleware/auth.go
-index a669db8..666b4d8 100644
+index a669db8..4197032 100644
 --- a/backend/app/middleware/auth.go
 +++ b/backend/app/middleware/auth.go
-@@ -18,7 +18,7 @@ func ApiAuth(app *iris.Application) iris.Handler {
+@@ -4,6 +4,7 @@ import (
+ 	"rustdesk-api-server-pro/app/model"
+ 	"rustdesk-api-server-pro/config"
+ 	"rustdesk-api-server-pro/helper"
++	"strings"
+ 	"time"
+ 
+ 	"github.com/golang-module/carbon/v2"
+@@ -18,7 +19,7 @@ func ApiAuth(app *iris.Application) iris.Handler {
  		token := jwt.FromHeader(context)
  
  		var authToken model.AuthToken
@@ -1147,7 +1285,27 @@ index a669db8..666b4d8 100644
  		if !get || err != nil {
  			context.StopWithText(iris.StatusUnauthorized, "Unauthorized")
  			return
-@@ -44,14 +44,14 @@ func AdminAuth(app *iris.Application) iris.Handler {
+@@ -38,24 +39,43 @@ func ApiAuth(app *iris.Application) iris.Handler {
+ 	}
+ }
+ 
++// CadenaTech: o que o auditor pode fazer no painel: so leitura do inicio, da auditoria, dos alertas, das acoes do
++// painel e dos acessos em andamento (o video das gravacoes vai por link assinado, fora daqui)
++func permitidoAuditor(metodo, rota string) bool {
++	if metodo != "GET" {
++		return false
++	}
++	for _, p := range []string{"/admin/userinfo", "/admin/dashboard/", "/admin/audit/", "/admin/alarms/", "/admin/console/", "/admin/connections/active"} {
++		if rota == strings.TrimSuffix(p, "/") || strings.HasPrefix(rota, p) {
++			return true
++		}
++	}
++	return false
++}
++
+ func AdminAuth(app *iris.Application) iris.Handler {
+ 	return func(context iris.Context) {
+ 		db := helper.GetAppDependency(app, "*xorm.Engine").(*xorm.Engine)
  		token := context.GetHeader("Authorization")
  
  		var authToken model.AuthToken
@@ -1160,10 +1318,19 @@ index a669db8..666b4d8 100644
  
  		var user model.User
 -		get, err = db.Where("id = ? and status > 0 and is_admin = 1", authToken.UserId).Get(&user)
-+		get, err = db.Where("id = ? and status > 0 and is_admin = ?", authToken.UserId, true).Get(&user)
++		// CadenaTech: o auditor tambem entra, mas so le as telas permitidas (permitidoAuditor)
++		get, err = db.Where("id = ? and status > 0 and (is_admin = ? or auditor = ?)", authToken.UserId, true, true).Get(&user)
  		if !get || err != nil {
  			context.StopWithText(iris.StatusNotAcceptable, "NotAcceptable")
  			return
+ 		}
++		if !user.IsAdmin && !permitidoAuditor(context.Method(), context.Path()) {
++			context.StopWithJSON(iris.StatusOK, iris.Map{"code": 403, "message": "NoPermission", "data": nil})
++			return
++		}
+ 
+ 		s := carbon.Now().DiffInSeconds(carbon.Parse(authToken.Expired.Format(config.TimeFormat)))
+ 		if s <= 60*5 {
 diff --git a/backend/app/model/address_book.go b/backend/app/model/address_book.go
 index 5d3a89c..0950fab 100644
 --- a/backend/app/model/address_book.go
@@ -1257,20 +1424,22 @@ index 1b94d8a..c73236b 100644
  	UpdatedAt        time.Time `xorm:"'updated_at' datetime updated"`
  }
 diff --git a/backend/app/model/user.go b/backend/app/model/user.go
-index 536b4c4..6cb774a 100644
+index 536b4c4..ce0176e 100644
 --- a/backend/app/model/user.go
 +++ b/backend/app/model/user.go
-@@ -19,7 +19,7 @@ type User struct {
+@@ -19,7 +19,9 @@ type User struct {
  	Note                string    `xorm:"'note' varchar(255)"`
  	LicensedDevices     int       `xorm:"'licensed_devices' int"`
  	Status              int       `xorm:"'status' tinyint"` // 0=disabled,1=normal,-1=unverified
 -	IsAdmin             bool      `xorm:"'is_admin' tinyint"`
 +	IsAdmin             bool      `xorm:"'is_admin' bool"`
++	// CadenaTech: auditor entra no painel so para ver (inicio, auditoria, gravacoes e acessos agora)
++	Auditor bool `xorm:"'auditor' bool default false"`
  	CreatedAt           time.Time `xorm:"'created_at' datetime created"`
  	UpdatedAt           time.Time `xorm:"'updated_at' datetime updated"`
  }
 diff --git a/backend/app/route.go b/backend/app/route.go
-index 954eafa..cade57f 100644
+index 954eafa..b8a9e6f 100644
 --- a/backend/app/route.go
 +++ b/backend/app/route.go
 @@ -3,6 +3,7 @@ package app
@@ -1281,7 +1450,7 @@ index 954eafa..cade57f 100644
  	"rustdesk-api-server-pro/app/middleware"
  
  	"github.com/kataras/iris/v12"
-@@ -30,6 +31,8 @@ func SetRoute(app *iris.Application) {
+@@ -30,9 +31,13 @@ func SetRoute(app *iris.Application) {
  	adminParty := app.Party("/admin")
  	adminMvc := mvc.New(adminParty)
  	adminMvc.Handle(new(admin.AuthController))
@@ -1290,7 +1459,12 @@ index 954eafa..cade57f 100644
  
  	adminWithAuthParty := app.Party("/admin")
  	adminWithAuthParty.Use(middleware.AdminAuth(app))
-@@ -43,5 +46,6 @@ func SetRoute(app *iris.Application) {
++	// CadenaTech: registro das acoes do painel (tudo o que altera algo)
++	adminWithAuthParty.Use(middleware.RegistrarAcoes(app))
+ 	{
+ 		adminWithAuthMvc := mvc.New(adminWithAuthParty)
+ 		adminWithAuthMvc.Handle(new(admin.IndexController))
+@@ -43,5 +48,6 @@ func SetRoute(app *iris.Application) {
  		adminWithAuthMvc.Handle(new(admin.MailTemplateController))
  		adminWithAuthMvc.Handle(new(admin.MaiLogsController))
  		adminWithAuthMvc.Handle(new(admin.DevicesController))
@@ -1312,10 +1486,10 @@ index cd8b90a..64ad1f7 100644
  
 diff --git a/backend/cmd/migrar.go b/backend/cmd/migrar.go
 new file mode 100644
-index 0000000..39338ee
+index 0000000..cb945aa
 --- /dev/null
 +++ b/backend/cmd/migrar.go
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,158 @@
 +package cmd
 +
 +// CadenaTech: copia todos os dados de um banco para outro (ex.: SQLite -> PostgreSQL), mantendo ids e datas.
@@ -1356,7 +1530,8 @@ index 0000000..39338ee
 +		new(model.VerifyCode),
 +		new(model.SystemSettings),
 +		new(model.MailTemplate),
-+		new(model.Alarm), // CadenaTech: alertas de seguranca
++		new(model.Alarm),        // CadenaTech: alertas de seguranca
++		new(model.ConsoleAudit), // CadenaTech: acoes do painel
 +	}
 +}
 +
@@ -2757,15 +2932,16 @@ index 0000000..d0f2ed3
 +	delete(tentativasLogin, chave)
 +}
 diff --git a/soybean-admin/src/locales/langs/en-us.ts b/soybean-admin/src/locales/langs/en-us.ts
-index 5d659c3..1853beb 100644
+index 5d659c3..88302d0 100644
 --- a/soybean-admin/src/locales/langs/en-us.ts
 +++ b/soybean-admin/src/locales/langs/en-us.ts
-@@ -166,7 +166,10 @@ const local: App.I18n.Schema = {
+@@ -166,7 +166,11 @@ const local: App.I18n.Schema = {
      system_mail: 'Mail Managment',
      audit_baselogs: 'Base Logs',
      audit_filetransferlogs: 'File Transfer Logs',
 -    devices: 'Devices'
 +    audit_alarms: 'Security alerts',
++    audit_console: 'Console actions',
 +    devices: 'Devices',
 +    connections: 'Active connections',
 +    catalogs: 'Shared address books'
@@ -2773,15 +2949,16 @@ index 5d659c3..1853beb 100644
    page: {
      login: {
 diff --git a/soybean-admin/src/router/elegant/imports.ts b/soybean-admin/src/router/elegant/imports.ts
-index 18550e7..a546bd8 100644
+index 18550e7..2e63b5f 100644
 --- a/soybean-admin/src/router/elegant/imports.ts
 +++ b/soybean-admin/src/router/elegant/imports.ts
-@@ -20,8 +20,11 @@ export const views: Record<LastLevelRouteKey, RouteComponent | (() => Promise<Ro
+@@ -20,8 +20,12 @@ export const views: Record<LastLevelRouteKey, RouteComponent | (() => Promise<Ro
    500: () => import("@/views/_builtin/500/index.vue"),
    "iframe-page": () => import("@/views/_builtin/iframe-page/[url].vue"),
    login: () => import("@/views/_builtin/login/index.vue"),
 +  audit_alarms: () => import("@/views/audit/alarms/index.vue"),
    audit_baselogs: () => import("@/views/audit/baseLogs/index.vue"),
++  audit_console: () => import("@/views/audit/console/index.vue"),
    audit_filetransferlogs: () => import("@/views/audit/fileTransferLogs/index.vue"),
 +  catalogs: () => import("@/views/catalogs/index.vue"),
 +  connections: () => import("@/views/connections/index.vue"),
@@ -2789,14 +2966,13 @@ index 18550e7..a546bd8 100644
    home: () => import("@/views/home/index.vue"),
    system_mail_logs: () => import("@/views/system/mail_logs/index.vue"),
 diff --git a/soybean-admin/src/router/elegant/routes.ts b/soybean-admin/src/router/elegant/routes.ts
-index d96117d..c12176b 100644
+index d96117d..4c38813 100644
 --- a/soybean-admin/src/router/elegant/routes.ts
 +++ b/soybean-admin/src/router/elegant/routes.ts
-@@ -69,9 +69,41 @@ export const generatedRoutes: GeneratedRoute[] = [
-           i18nKey: 'route.audit_filetransferlogs',
-           icon: 'solar:square-transfer-horizontal-linear'
-         }
-+      },
+@@ -50,6 +50,26 @@ export const generatedRoutes: GeneratedRoute[] = [
+       order: 3
+     },
+     children: [
 +      {
 +        name: 'audit_alarms',
 +        path: '/audit/alarms',
@@ -2806,6 +2982,21 @@ index d96117d..c12176b 100644
 +          i18nKey: 'route.audit_alarms',
 +          icon: 'mdi:shield-alert-outline'
 +        }
++      },
++      {
++        name: 'audit_console',
++        path: '/audit/console',
++        component: 'view.audit_console',
++        meta: {
++          title: 'audit_console',
++          i18nKey: 'route.audit_console',
++          icon: 'mdi:account-clock-outline'
++        }
++      },
+       {
+         name: 'audit_baselogs',
+         path: '/audit/baselogs',
+@@ -72,6 +92,29 @@ export const generatedRoutes: GeneratedRoute[] = [
        }
      ]
    },
@@ -2817,7 +3008,8 @@ index d96117d..c12176b 100644
 +      title: 'catalogs',
 +      i18nKey: 'route.catalogs',
 +      icon: 'mdi:book-account-outline',
-+      order: 7
++      order: 7,
++      roles: ['R_SUPER']
 +    }
 +  },
 +  {
@@ -2834,16 +3026,47 @@ index d96117d..c12176b 100644
    {
      name: 'devices',
      path: '/devices',
+@@ -80,7 +123,8 @@ export const generatedRoutes: GeneratedRoute[] = [
+       title: 'devices',
+       i18nKey: 'route.devices',
+       icon: 'mdi:desktop-classic',
+-      order: 5
++      order: 5,
++      roles: ['R_SUPER']
+     }
+   },
+   {
+@@ -127,7 +171,8 @@ export const generatedRoutes: GeneratedRoute[] = [
+       title: 'system',
+       i18nKey: 'route.system',
+       icon: 'hugeicons:system-update-01',
+-      order: 4
++      order: 4,
++      roles: ['R_SUPER']
+     },
+     children: [
+       {
+@@ -170,7 +215,8 @@ export const generatedRoutes: GeneratedRoute[] = [
+       title: 'user',
+       icon: 'majesticons:users-line',
+       i18nKey: 'route.user',
+-      order: 2
++      order: 2,
++      roles: ['R_SUPER']
+     },
+     children: [
+       {
 diff --git a/soybean-admin/src/router/elegant/transform.ts b/soybean-admin/src/router/elegant/transform.ts
-index 0bf5641..ad6bbbf 100644
+index 0bf5641..a1e1926 100644
 --- a/soybean-admin/src/router/elegant/transform.ts
 +++ b/soybean-admin/src/router/elegant/transform.ts
-@@ -167,8 +167,11 @@ const routeMap: RouteMap = {
+@@ -167,8 +167,12 @@ const routeMap: RouteMap = {
    "404": "/404",
    "500": "/500",
    "audit": "/audit",
 +  "audit_alarms": "/audit/alarms",
    "audit_baselogs": "/audit/baselogs",
++  "audit_console": "/audit/console",
    "audit_filetransferlogs": "/audit/filetransferlogs",
 +  "catalogs": "/catalogs",
 +  "connections": "/connections",
@@ -2852,10 +3075,10 @@ index 0bf5641..ad6bbbf 100644
    "iframe-page": "/iframe-page/:url",
 diff --git a/soybean-admin/src/service/api/cadena.ts b/soybean-admin/src/service/api/cadena.ts
 new file mode 100644
-index 0000000..506aeeb
+index 0000000..e5019da
 --- /dev/null
 +++ b/soybean-admin/src/service/api/cadena.ts
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,102 @@
 +// CadenaTech: catalogos compartilhados e acessos em andamento (backend: app/controller/admin/cadena.go)
 +import { request } from '../request';
 +
@@ -2928,6 +3151,26 @@ index 0000000..506aeeb
 +  return request<CadenaConexao[]>({ url: '/connections/active' });
 +}
 +
++export interface CadenaAcaoPainel {
++  id: number;
++  usuario: string;
++  acao: string;
++  rota: string;
++  alvo: string;
++  ip: string;
++  sucesso: boolean;
++  resultado: string;
++  detalhes: string;
++  created_at: string;
++}
++
++export function fetchAcoesPainel(params: { current: number; size: number; usuario?: string }) {
++  return request<{ total: number; records: CadenaAcaoPainel[]; current: number; size: number }>({
++    url: '/console/list',
++    params
++  });
++}
++
 +export function desconectarAcesso(id: number) {
 +  return request({ url: '/connections/disconnect', method: 'post', data: { id } });
 +}
@@ -2939,22 +3182,23 @@ index 0000000..506aeeb
 +  });
 +}
 diff --git a/soybean-admin/src/typings/elegant-router.d.ts b/soybean-admin/src/typings/elegant-router.d.ts
-index 804b505..904edd7 100644
+index 804b505..4b7ae4d 100644
 --- a/soybean-admin/src/typings/elegant-router.d.ts
 +++ b/soybean-admin/src/typings/elegant-router.d.ts
-@@ -21,8 +21,11 @@ declare module "@elegant-router/types" {
+@@ -21,8 +21,12 @@ declare module "@elegant-router/types" {
      "404": "/404";
      "500": "/500";
      "audit": "/audit";
 +    "audit_alarms": "/audit/alarms";
      "audit_baselogs": "/audit/baselogs";
++    "audit_console": "/audit/console";
      "audit_filetransferlogs": "/audit/filetransferlogs";
 +    "catalogs": "/catalogs";
 +    "connections": "/connections";
      "devices": "/devices";
      "home": "/home";
      "iframe-page": "/iframe-page/:url";
-@@ -69,6 +72,8 @@ declare module "@elegant-router/types" {
+@@ -69,6 +73,8 @@ declare module "@elegant-router/types" {
      | "404"
      | "500"
      | "audit"
@@ -2963,12 +3207,13 @@ index 804b505..904edd7 100644
      | "devices"
      | "home"
      | "iframe-page"
-@@ -96,8 +101,11 @@ declare module "@elegant-router/types" {
+@@ -96,8 +102,12 @@ declare module "@elegant-router/types" {
      | "500"
      | "iframe-page"
      | "login"
 +    | "audit_alarms"
      | "audit_baselogs"
++    | "audit_console"
      | "audit_filetransferlogs"
 +    | "catalogs"
 +    | "connections"
@@ -3193,10 +3438,10 @@ index 0000000..b64cc9d
 +</template>
 diff --git a/soybean-admin/src/views/connections/index.vue b/soybean-admin/src/views/connections/index.vue
 new file mode 100644
-index 0000000..222bf7e
+index 0000000..31e47a8
 --- /dev/null
 +++ b/soybean-admin/src/views/connections/index.vue
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,127 @@
 +<script setup lang="tsx">
 +// CadenaTech: acessos em andamento, a partir da auditoria que o Cliente envia (abertura e fechamento de cada
 +// conexao). Atualiza sozinha a cada 15 segundos.
@@ -3204,9 +3449,12 @@ index 0000000..222bf7e
 +import { NButton, NPopconfirm, NTag } from 'naive-ui';
 +import type { DataTableColumns } from 'naive-ui';
 +import { $t } from '@/locales';
++import { useAuthStore } from '@/store/modules/auth';
 +import { desconectarAcesso, fetchConexoesAtivas, type CadenaConexao } from '@/service/api/cadena';
 +
 +defineOptions({ name: 'CadenaConexoes' });
++
++const somenteLeitura = (useAuthStore().userInfo.roles || []).includes('auditor');
 +
 +const lista = ref<CadenaConexao[]>([]);
 +const carregando = ref(false);
@@ -3257,8 +3505,11 @@ index 0000000..222bf7e
 +    title: $t('common.action'),
 +    align: 'center',
 +    width: 150,
++    // O auditor so ve (a API tambem recusa o pedido dele)
 +    render: row =>
-+      row.desconectando ? (
++      somenteLeitura ? (
++        '—'
++      ) : row.desconectando ? (
 +        <NTag type="warning">Desconectando…</NTag>
 +      ) : (
 +        <NPopconfirm
@@ -3382,18 +3633,20 @@ index 3447296..19113c9 100644
  	}
  	return c.Success(iris.Map{
 diff --git a/soybean-admin/src/views/audit/baseLogs/index.vue b/soybean-admin/src/views/audit/baseLogs/index.vue
-index 5cfa31e..38f453d 100644
+index 5cfa31e..436fb71 100644
 --- a/soybean-admin/src/views/audit/baseLogs/index.vue
 +++ b/soybean-admin/src/views/audit/baseLogs/index.vue
-@@ -1,5 +1,6 @@
+@@ -1,6 +1,8 @@
  <script setup lang="tsx">
 -import { NTag } from 'naive-ui';
 +import { computed, ref } from 'vue';
 +import { NButton, NTag } from 'naive-ui';
  import { fetchAuditLogList } from '@/service/api/audit';
++import { cadenaBaixarCsv, cadenaBuscarTudo } from '@/utils/cadena-csv';
  import { $t } from '@/locales';
  import { useAppStore } from '@/store/modules/app';
-@@ -77,6 +78,13 @@ const {
+ import { useTable } from '@/hooks/common/table';
+@@ -77,6 +79,13 @@ const {
        title: $t('dataMap.audit.rustdesk_id'),
        align: 'center'
      },
@@ -3407,7 +3660,7 @@ index 5cfa31e..38f453d 100644
      {
        key: 'ip',
        title: $t('dataMap.audit.ip'),
-@@ -101,9 +109,48 @@ const {
+@@ -101,9 +110,77 @@ const {
        key: 'closed_at',
        title: $t('dataMap.audit.closed_at'),
        align: 'center'
@@ -3453,10 +3706,56 @@ index 5cfa31e..38f453d 100644
 +}
 +
 +const linkVideo = computed(() => (videoAtual.value ? baseServico + videoAtual.value.url : ''));
++
++// CadenaTech: exportar para CSV com os filtros da pesquisa
++const exportando = ref(false);
++async function exportarCsv() {
++  exportando.value = true;
++  const linhas = await cadenaBuscarTudo<Api.Audit.AuditLog>(fetchAuditLogList, { ...searchParams });
++  const tipo = (v: number) => {
++    const o = AuditTypeOptions.find(x => x.value === v);
++    return o ? $t(o.label as App.I18n.I18nKey) : String(v);
++  };
++  cadenaBaixarCsv(
++    'registro-de-acessos',
++    [
++      { titulo: 'ID', valor: r => r.id },
++      { titulo: 'Tipo', valor: r => tipo(r.type) },
++      { titulo: 'Conexão', valor: r => r.conn_id },
++      { titulo: 'Computador', valor: r => r.rustdesk_id },
++      { titulo: 'Técnico', valor: r => r.tecnico },
++      { titulo: 'ID do técnico', valor: r => r.tecnico_id },
++      { titulo: 'IP', valor: r => r.ip },
++      { titulo: 'Sessão', valor: r => r.session_id },
++      { titulo: 'Início', valor: r => r.created_at },
++      { titulo: 'Fim', valor: r => r.closed_at },
++      { titulo: 'Gravações', valor: r => (r.gravacoes || []).map(g => g.nome).join(' | ') }
++    ],
++    linhas
++  );
++  exportando.value = false;
++}
  </script>
  
  <template>
-@@ -119,7 +166,7 @@ const {
+@@ -112,14 +189,23 @@ const {
+ 
+     <NCard :title="$t('route.audit')" :bordered="false" size="small" class="sm:flex-1-hidden card-wrapper">
+       <template #header-extra>
+-        <TableHeader v-model:columns="columnChecks" :loading="loading" @refresh="getData" />
++        <TableHeader v-model:columns="columnChecks" :loading="loading" @refresh="getData">
++          <template #prefix>
++            <NButton size="small" :loading="exportando" @click="exportarCsv">
++              <template #icon>
++                <icon-mdi-file-delimited-outline class="text-icon" />
++              </template>
++              Exportar CSV
++            </NButton>
++          </template>
++        </TableHeader>
+       </template>
+       <NDataTable
+         :columns="columns"
          :data="data"
          size="small"
          :flex-height="!appStore.isMobile"
@@ -3465,7 +3764,7 @@ index 5cfa31e..38f453d 100644
          :loading="loading"
          remote
          :row-key="row => row.id"
-@@ -127,6 +174,37 @@ const {
+@@ -127,6 +213,37 @@ const {
          class="sm:h-full"
        />
      </NCard>
@@ -3504,10 +3803,28 @@ index 5cfa31e..38f453d 100644
  </template>
  
 diff --git a/soybean-admin/src/typings/api.d.ts b/soybean-admin/src/typings/api.d.ts
-index 1513bc1..82f2746 100644
+index 1513bc1..d6e11b3 100644
 --- a/soybean-admin/src/typings/api.d.ts
 +++ b/soybean-admin/src/typings/api.d.ts
-@@ -134,6 +134,15 @@ declare namespace Api {
+@@ -36,6 +36,8 @@ declare namespace Api {
+       password: string;
+       code: string;
+       captchaId: string;
++      /** CadenaTech: codigo do autenticador (2FA) */
++      tfaCode?: string;
+     }
+   }
+ 
+@@ -94,6 +96,8 @@ declare namespace Api {
+       note: string;
+       status: number;
+       is_admin: boolean;
++      /** CadenaTech: so ve a auditoria no painel */
++      auditor?: boolean;
+       admin_status: number;
+       tfa_code: string;
+     }>;
+@@ -134,6 +138,15 @@ declare namespace Api {
    }
  
    namespace Audit {
@@ -3523,7 +3840,7 @@ index 1513bc1..82f2746 100644
      type AuditLog = Common.CommonRecord<{
        username: string;
        conn_id: string;
-@@ -142,7 +151,10 @@ declare namespace Api {
+@@ -142,7 +155,10 @@ declare namespace Api {
        session_id: string;
        uuid: string;
        type: number;
@@ -3861,10 +4178,10 @@ index 6ec7fa6..93b4eaa 100644
  
 diff --git a/soybean-admin/src/views/audit/alarms/index.vue b/soybean-admin/src/views/audit/alarms/index.vue
 new file mode 100644
-index 0000000..4da439d
+index 0000000..167b59a
 --- /dev/null
 +++ b/soybean-admin/src/views/audit/alarms/index.vue
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,160 @@
 +<script setup lang="tsx">
 +// CadenaTech: alertas de seguranca que os Clientes enviam (POST /api/audit/alarm): senha errada repetida, IP ou ID
 +// fora da lista permitida etc.
@@ -3872,6 +4189,7 @@ index 0000000..4da439d
 +import { NTag } from 'naive-ui';
 +import type { DataTableColumns, PaginationProps } from 'naive-ui';
 +import { fetchAlertas, type CadenaAlerta } from '@/service/api/cadena';
++import { cadenaBaixarCsv, cadenaBuscarTudo } from '@/utils/cadena-csv';
 +
 +defineOptions({ name: 'CadenaAlertas' });
 +
@@ -3927,6 +4245,27 @@ index 0000000..4da439d
 +  carregar();
 +}
 +
++const exportando = ref(false);
++async function exportarCsv() {
++  exportando.value = true;
++  const linhas = await cadenaBuscarTudo<CadenaAlerta>(fetchAlertas as any, {
++    rustdesk_id: filtro.value.trim() || undefined
++  });
++  cadenaBaixarCsv(
++    'alertas-de-seguranca',
++    [
++      { titulo: 'Quando', valor: r => r.created_at },
++      { titulo: 'Alerta', valor: r => tipos[r.tipo]?.nome || `Tipo ${r.tipo}` },
++      { titulo: 'Computador', valor: r => r.hostname },
++      { titulo: 'ID', valor: r => r.rustdesk_id },
++      { titulo: 'IP de origem', valor: r => r.ip },
++      { titulo: 'Detalhes', valor: r => detalhes(r.info) }
++    ],
++    linhas
++  );
++  exportando.value = false;
++}
++
 +// O "info" vem em JSON do Cliente; mostra os campos de um jeito legivel
 +function detalhes(info: string) {
 +  try {
@@ -3973,6 +4312,12 @@ index 0000000..4da439d
 +    <template #header-extra>
 +      <NSpace align="center" wrap justify="end">
 +        <NInput v-model:value="filtro" size="small" clearable placeholder="ID do computador" class="w-180px" @keyup.enter="pesquisar" @clear="pesquisar" />
++        <NButton size="small" :loading="exportando" @click="exportarCsv">
++          <template #icon>
++            <icon-mdi-file-delimited-outline class="text-icon" />
++          </template>
++          Exportar CSV
++        </NButton>
 +        <NButton size="small" @click="pesquisar">
 +          <template #icon>
 +            <icon-mdi-refresh class="text-icon" :class="{ 'animate-spin': carregando }" />
@@ -3997,3 +4342,626 @@ index 0000000..4da439d
 +    />
 +  </NCard>
 +</template>
+diff --git a/backend/app/form/admin/login_form.go b/backend/app/form/admin/login_form.go
+index 3b2579d..0f0e385 100644
+--- a/backend/app/form/admin/login_form.go
++++ b/backend/app/form/admin/login_form.go
+@@ -5,4 +5,6 @@ type LoginForm struct {
+ 	Password  string `json:"password"`
+ 	Code      string `json:"code"`
+ 	CaptchaId string `json:"captchaId"`
++	// CadenaTech: codigo do autenticador (TOTP), exigido de quem tem "2FA" na verificacao de login
++	TfaCode string `json:"tfaCode"`
+ }
+diff --git a/backend/app/form/admin/user_form.go b/backend/app/form/admin/user_form.go
+index 3fab2bb..a905f9e 100644
+--- a/backend/app/form/admin/user_form.go
++++ b/backend/app/form/admin/user_form.go
+@@ -13,4 +13,5 @@ type UserForm struct {
+ 	LicensedDevices     int    `json:"licensed_devices"`
+ 	Status              int    `json:"status"`
+ 	IsAdmin             bool   `json:"is_admin"`
++	Auditor             bool   `json:"auditor"` // CadenaTech: so ve a auditoria no painel
+ }
+diff --git a/backend/app/model/console_audit.go b/backend/app/model/console_audit.go
+new file mode 100644
+index 0000000..6de1d32
+--- /dev/null
++++ b/backend/app/model/console_audit.go
+@@ -0,0 +1,23 @@
++package model
++
++import "time"
++
++// CadenaTech: acoes feitas no painel (criar/editar/excluir, derrubar acesso, entrar no painel), com quem, de onde
++// e o resultado. Os detalhes guardam o que foi enviado, sem senhas, segredos nem codigos
++type ConsoleAudit struct {
++	Id        int       `xorm:"'id' int notnull pk autoincr"`
++	UserId    int       `xorm:"'user_id' int index"`
++	Usuario   string    `xorm:"'usuario' varchar(100)"`
++	Acao      string    `xorm:"'acao' varchar(100)"`
++	Rota      string    `xorm:"'rota' varchar(150)"`
++	Alvo      string    `xorm:"'alvo' varchar(255)"`
++	IP        string    `xorm:"'ip' varchar(64)"`
++	Sucesso   bool      `xorm:"'sucesso' bool"`
++	Resultado string    `xorm:"'resultado' varchar(255)"`
++	Detalhes  string    `xorm:"'detalhes' text"`
++	CreatedAt time.Time `xorm:"'created_at' datetime created index"`
++}
++
++func (m *ConsoleAudit) TableName() string {
++	return "console_audit"
++}
+diff --git a/backend/app/acoes/acoes.go b/backend/app/acoes/acoes.go
+new file mode 100644
+index 0000000..910842b
+--- /dev/null
++++ b/backend/app/acoes/acoes.go
+@@ -0,0 +1,115 @@
++package acoes
++
++// CadenaTech: registro das acoes do painel (tabela console_audit). Gravado pelo middleware de todas as chamadas do
++// painel que alteram algo (POST) e pelo login do painel (acertos e erros).
++
++import (
++	"encoding/json"
++	"sort"
++	"strings"
++
++	"rustdesk-api-server-pro/app/model"
++
++	"github.com/kataras/iris/v12"
++	"xorm.io/xorm"
++)
++
++// Nomes das acoes pela rota (o que nao estiver aqui aparece com a propria rota)
++var nomes = map[string]string{
++	"/admin/users/add":              "Criou usuário",
++	"/admin/users/edit":             "Editou usuário",
++	"/admin/users/delete":           "Excluiu usuário",
++	"/admin/users/totp":             "Gerou chave 2FA",
++	"/admin/catalogs/save":          "Salvou catálogo",
++	"/admin/catalogs/delete":        "Excluiu catálogo",
++	"/admin/connections/disconnect": "Derrubou acesso",
++	"/admin/sessions/kill":          "Encerrou sessão de login",
++	"/admin/mail/templates/add":     "Criou modelo de e-mail",
++	"/admin/mail/templates/edit":    "Editou modelo de e-mail",
++	"/admin/auth/login":             "Entrou no painel",
++}
++
++// Campos que nunca vao para os detalhes
++func sensivel(chave string) bool {
++	c := strings.ToLower(chave)
++	for _, s := range []string{"password", "senha", "secret", "segredo", "tfa", "code", "codigo", "token", "captcha"} {
++		if strings.Contains(c, s) {
++			return true
++		}
++	}
++	return false
++}
++
++// Nome da acao para a rota
++func Nome(rota string) string {
++	if n, ok := nomes[strings.TrimSuffix(rota, "/")]; ok {
++		return n
++	}
++	return rota
++}
++
++// Resumir devolve o alvo (quem ou o que foi alterado) e os detalhes sem dados sensiveis
++func Resumir(corpo []byte) (alvo string, detalhes string) {
++	var dados map[string]interface{}
++	if len(corpo) == 0 || json.Unmarshal(corpo, &dados) != nil {
++		return "", ""
++	}
++	limpo := map[string]interface{}{}
++	for k, v := range dados {
++		if !sensivel(k) {
++			limpo[k] = v
++		}
++	}
++	partes := []string{}
++	for _, k := range []string{"username", "name", "rustdesk_id", "id", "ids"} {
++		if v, ok := limpo[k]; ok && v != nil && v != "" {
++			b, _ := json.Marshal(v)
++			partes = append(partes, k+": "+strings.Trim(string(b), `"`))
++		}
++	}
++	alvo = strings.Join(partes, ", ")
++	chaves := make([]string, 0, len(limpo))
++	for k := range limpo {
++		chaves = append(chaves, k)
++	}
++	sort.Strings(chaves)
++	ordenado := make([]string, 0, len(chaves))
++	for _, k := range chaves {
++		b, _ := json.Marshal(limpo[k])
++		ordenado = append(ordenado, k+"="+string(b))
++	}
++	detalhes = strings.Join(ordenado, " ")
++	if len(alvo) > 250 {
++		alvo = alvo[:250]
++	}
++	if len(detalhes) > 2000 {
++		detalhes = detalhes[:2000]
++	}
++	return alvo, detalhes
++}
++
++// IP de quem chamou (o tunel da Cloudflare manda o original em CF-Connecting-IP)
++func IP(ctx iris.Context) string {
++	if ip := strings.TrimSpace(ctx.GetHeader("CF-Connecting-IP")); ip != "" {
++		return ip
++	}
++	return ctx.RemoteAddr()
++}
++
++// Registrar grava uma acao
++func Registrar(db *xorm.Engine, userId int, usuario, ip, rota, acao, alvo, detalhes string, sucesso bool, resultado string) {
++	if len(resultado) > 250 {
++		resultado = resultado[:250]
++	}
++	_, _ = db.Insert(&model.ConsoleAudit{
++		UserId:    userId,
++		Usuario:   usuario,
++		Acao:      acao,
++		Rota:      rota,
++		Alvo:      alvo,
++		IP:        ip,
++		Sucesso:   sucesso,
++		Resultado: resultado,
++		Detalhes:  detalhes,
++	})
++}
+diff --git a/backend/app/middleware/acoes.go b/backend/app/middleware/acoes.go
+new file mode 100644
+index 0000000..c54e0f7
+--- /dev/null
++++ b/backend/app/middleware/acoes.go
+@@ -0,0 +1,38 @@
++package middleware
++
++// CadenaTech: grava no registro de acoes (console_audit) toda chamada do painel que altera algo, com o resultado
++
++import (
++	"rustdesk-api-server-pro/app/acoes"
++	"rustdesk-api-server-pro/app/model"
++	"rustdesk-api-server-pro/config"
++	"rustdesk-api-server-pro/helper"
++
++	"github.com/kataras/iris/v12"
++	"github.com/tidwall/gjson"
++	"xorm.io/xorm"
++)
++
++func RegistrarAcoes(app *iris.Application) iris.Handler {
++	return func(ctx iris.Context) {
++		if ctx.Method() == "GET" || ctx.Method() == "OPTIONS" {
++			ctx.Next()
++			return
++		}
++		ctx.RecordRequestBody(true)
++		corpo, _ := ctx.GetBody()
++		ctx.Record()
++		ctx.Next()
++
++		db := helper.GetAppDependency(app, "*xorm.Engine").(*xorm.Engine)
++		userId, usuario := 0, ""
++		if u, ok := ctx.Values().Get(config.AdminUserKey).(*model.User); ok && u != nil {
++			userId, usuario = u.Id, u.Username
++		}
++		resposta := ctx.Recorder().Body()
++		codigo := gjson.GetBytes(resposta, "code").Int()
++		alvo, detalhes := acoes.Resumir(corpo)
++		acoes.Registrar(db, userId, usuario, acoes.IP(ctx), ctx.Path(), acoes.Nome(ctx.Path()), alvo, detalhes,
++			codigo == 200, gjson.GetBytes(resposta, "message").String())
++	}
++}
+diff --git a/backend/app/controller/admin/index.go b/backend/app/controller/admin/index.go
+index 7001a4f..ae1c545 100644
+--- a/backend/app/controller/admin/index.go
++++ b/backend/app/controller/admin/index.go
+@@ -15,8 +15,14 @@ func (c *IndexController) BeforeActivation(b mvc.BeforeActivation) {
+ 
+ func (c *IndexController) HandleUserInfo() mvc.Result {
+ 	user := c.GetUser()
++	// CadenaTech: papel para o menu do painel. R_SUPER ve tudo; "auditor" so as telas sem meta.roles
++	roles := []string{"R_SUPER"}
++	if !user.IsAdmin {
++		roles = []string{"auditor"}
++	}
+ 	return c.Success(iris.Map{
+ 		"userId":   user.Id,
+ 		"userName": user.Name,
++		"roles":    roles,
+ 	}, "ok")
+ }
+diff --git a/soybean-admin/src/service/api/auth.ts b/soybean-admin/src/service/api/auth.ts
+index c7aa859..0ad1915 100644
+--- a/soybean-admin/src/service/api/auth.ts
++++ b/soybean-admin/src/service/api/auth.ts
+@@ -14,7 +14,8 @@ export function fetchLogin(model: Api.Form.LoginForm) {
+       username: model.username,
+       password: model.password,
+       code: model.code,
+-      captchaId: model.captchaId
++      captchaId: model.captchaId,
++      tfaCode: model.tfaCode || ''
+     }
+   });
+ }
+diff --git a/soybean-admin/src/views/_builtin/login/modules/pwd-login.vue b/soybean-admin/src/views/_builtin/login/modules/pwd-login.vue
+index fe4a495..aeac592 100644
+--- a/soybean-admin/src/views/_builtin/login/modules/pwd-login.vue
++++ b/soybean-admin/src/views/_builtin/login/modules/pwd-login.vue
+@@ -1,5 +1,5 @@
+ <script setup lang="ts">
+-import { computed, onMounted, reactive } from 'vue';
++import { computed, onMounted, reactive, ref } from 'vue';
+ import { $t } from '@/locales';
+ import { useNaiveForm } from '@/hooks/common/form';
+ import { useAuthStore } from '@/store/modules/auth';
+@@ -16,9 +16,13 @@ const model: Api.Form.LoginForm = reactive({
+   username: '',
+   password: '',
+   code: '',
+-  captchaId: ''
++  captchaId: '',
++  tfaCode: ''
+ });
+ 
++// CadenaTech: o campo do codigo do autenticador aparece quando a API pede (conta com 2FA)
++const pedirCodigo = ref(false);
++
+ const captcha: Api.Auth.Captcha = reactive({
+   id: '',
+   img: ''
+@@ -56,7 +60,13 @@ const rules = computed<Record<keyof Api.Form.LoginForm, App.Global.FormRule[]>>(
+ async function handleSubmit() {
+   await validate();
+   const err = await authStore.login(model);
+-  if (err?.response?.data.message === 'CaptchaError') {
++  if (err) {
++    // O codigo da imagem vale uma vez: qualquer erro pede outro
++    const mensagem = err?.response?.data.message;
++    if (mensagem === 'TfaRequired' || mensagem === 'TfaCodeError') {
++      pedirCodigo.value = true;
++    }
++    model.code = '';
+     handleCaptcha();
+   }
+ }
+@@ -85,6 +95,14 @@ onMounted(() => {
+         :placeholder="$t('page.login.common.passwordPlaceholder')"
+       />
+     </NFormItem>
++    <NFormItem v-if="pedirCodigo" path="tfaCode">
++      <NInput
++        v-model:value="model.tfaCode"
++        :maxlength="8"
++        :input-props="{ autocomplete: 'one-time-code', inputmode: 'numeric' }"
++        placeholder="Código de 6 dígitos do autenticador (2FA)"
++      />
++    </NFormItem>
+     <NFormItem path="code">
+       <NInput v-model:value="model.code" :clearable="true" :placeholder="$t('page.login.common.codePlaceholder')" />
+       <div class="pl-8px">
+diff --git a/soybean-admin/src/utils/cadena-csv.ts b/soybean-admin/src/utils/cadena-csv.ts
+new file mode 100644
+index 0000000..8558032
+--- /dev/null
++++ b/soybean-admin/src/utils/cadena-csv.ts
+@@ -0,0 +1,46 @@
++// CadenaTech: exportar as telas de auditoria para CSV (abre no Excel: separador ";" e BOM para os acentos)
++
++export interface CadenaColunaCsv<T> {
++  titulo: string;
++  valor: (linha: T) => string | number | boolean | null | undefined;
++}
++
++function celula(v: unknown) {
++  const s = v === null || v === undefined ? '' : String(v);
++  return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
++}
++
++export function cadenaBaixarCsv<T>(nome: string, colunas: CadenaColunaCsv<T>[], linhas: T[]) {
++  const texto = [colunas.map(c => celula(c.titulo)).join(';')]
++    .concat(linhas.map(l => colunas.map(c => celula(c.valor(l))).join(';')))
++    .join('\r\n');
++  const blob = new Blob([`﻿${texto}`], { type: 'text/csv;charset=utf-8' });
++  const url = URL.createObjectURL(blob);
++  const a = document.createElement('a');
++  const data = new Date().toISOString().slice(0, 10);
++  a.href = url;
++  a.download = `${nome}-${data}.csv`;
++  document.body.appendChild(a);
++  a.click();
++  a.remove();
++  setTimeout(() => URL.revokeObjectURL(url), 2000);
++}
++
++/** Busca todas as paginas de uma listagem paginada (records/total) para exportar, ate o limite */
++export async function cadenaBuscarTudo<T>(
++  buscar: (params: any) => Promise<{ data?: { records?: T[]; total?: number } | null; error?: any }>,
++  params: Record<string, any>,
++  limite = 20000
++) {
++  const todos: T[] = [];
++  const tamanho = 500;
++  for (let pagina = 1; todos.length < limite; pagina += 1) {
++    // eslint-disable-next-line no-await-in-loop
++    const res = await buscar({ ...params, current: pagina, size: tamanho });
++    if (res.error || !res.data) break;
++    const recs = res.data.records || [];
++    todos.push(...recs);
++    if (recs.length < tamanho || todos.length >= (res.data.total || 0)) break;
++  }
++  return todos;
++}
+diff --git a/soybean-admin/src/views/audit/fileTransferLogs/index.vue b/soybean-admin/src/views/audit/fileTransferLogs/index.vue
+index c514fc3..3ec22fd 100644
+--- a/soybean-admin/src/views/audit/fileTransferLogs/index.vue
++++ b/soybean-admin/src/views/audit/fileTransferLogs/index.vue
+@@ -1,6 +1,8 @@
+ <script setup lang="tsx">
++import { ref } from 'vue';
+ import { NTag } from 'naive-ui';
+ import { fetchAuditFileTransferLogList } from '@/service/api/audit';
++import { cadenaBaixarCsv, cadenaBuscarTudo } from '@/utils/cadena-csv';
+ import { $t } from '@/locales';
+ import { useAppStore } from '@/store/modules/app';
+ import { useTable } from '@/hooks/common/table';
+@@ -91,6 +93,31 @@ const {
+     }
+   ]
+ });
++
++// CadenaTech: exportar para CSV com os filtros da pesquisa
++const exportando = ref(false);
++async function exportarCsv() {
++  exportando.value = true;
++  const linhas = await cadenaBuscarTudo<any>(fetchAuditFileTransferLogList, { ...searchParams });
++  const tipo = (v: number) => {
++    const o = AuditFileTransferTypeOptions.find(x => x.value === v);
++    return o ? $t(o.label as App.I18n.I18nKey) : String(v);
++  };
++  cadenaBaixarCsv(
++    'transferencias',
++    [
++      { titulo: 'ID', valor: r => r.id },
++      { titulo: 'Tipo', valor: r => tipo(r.type) },
++      { titulo: 'Computador', valor: r => r.rustdesk_id },
++      { titulo: 'Outro lado', valor: r => r.peer_id },
++      { titulo: 'Caminho', valor: r => r.path },
++      { titulo: 'UUID', valor: r => r.uuid },
++      { titulo: 'Data', valor: r => r.created_at }
++    ],
++    linhas
++  );
++  exportando.value = false;
++}
+ </script>
+ 
+ <template>
+@@ -99,7 +126,16 @@ const {
+ 
+     <NCard :title="$t('route.audit')" :bordered="false" size="small" class="sm:flex-1-hidden card-wrapper">
+       <template #header-extra>
+-        <TableHeader v-model:columns="columnChecks" :loading="loading" @refresh="getData" />
++        <TableHeader v-model:columns="columnChecks" :loading="loading" @refresh="getData">
++          <template #prefix>
++            <NButton size="small" :loading="exportando" @click="exportarCsv">
++              <template #icon>
++                <icon-mdi-file-delimited-outline class="text-icon" />
++              </template>
++              Exportar CSV
++            </NButton>
++          </template>
++        </TableHeader>
+       </template>
+       <NDataTable
+         :columns="columns"
+diff --git a/soybean-admin/src/views/audit/console/index.vue b/soybean-admin/src/views/audit/console/index.vue
+new file mode 100644
+index 0000000..ae64fba
+--- /dev/null
++++ b/soybean-admin/src/views/audit/console/index.vue
+@@ -0,0 +1,145 @@
++<script setup lang="tsx">
++// CadenaTech: registro das acoes feitas no painel (quem criou, editou ou excluiu algo, quem derrubou um acesso e
++// as entradas no painel, inclusive as que falharam). Senhas, segredos e codigos nunca sao guardados.
++import { onMounted, reactive, ref } from 'vue';
++import { NTag } from 'naive-ui';
++import type { DataTableColumns, PaginationProps } from 'naive-ui';
++import { fetchAcoesPainel, type CadenaAcaoPainel } from '@/service/api/cadena';
++import { cadenaBaixarCsv, cadenaBuscarTudo } from '@/utils/cadena-csv';
++import { $t } from '@/locales';
++
++defineOptions({ name: 'CadenaAcoesPainel' });
++
++const lista = ref<CadenaAcaoPainel[]>([]);
++const carregando = ref(false);
++const exportando = ref(false);
++const filtro = ref('');
++const paginacao = reactive<PaginationProps>({
++  page: 1,
++  pageSize: 20,
++  itemCount: 0,
++  showSizePicker: true,
++  pageSizes: [20, 50, 100],
++  prefix: ({ itemCount }) => `Total de ${itemCount} ações`,
++  onUpdatePage: (p: number) => {
++    paginacao.page = p;
++    carregar();
++  },
++  onUpdatePageSize: (s: number) => {
++    paginacao.pageSize = s;
++    paginacao.page = 1;
++    carregar();
++  }
++});
++
++async function carregar() {
++  carregando.value = true;
++  const res = await fetchAcoesPainel({
++    current: paginacao.page || 1,
++    size: paginacao.pageSize || 20,
++    usuario: filtro.value.trim() || undefined
++  });
++  if (!res.error && res.data) {
++    lista.value = res.data.records || [];
++    paginacao.itemCount = res.data.total;
++  }
++  carregando.value = false;
++}
++
++function pesquisar() {
++  paginacao.page = 1;
++  carregar();
++}
++
++// Mensagem de resultado da API (codigo de traducao, ex.: UserAddSuccess) em texto
++function resultado(r: CadenaAcaoPainel) {
++  if (!r.resultado || r.resultado === 'ok') return r.sucesso ? 'ok' : '';
++  const t = $t(`api.${r.resultado}` as App.I18n.I18nKey);
++  return t.startsWith('api.') ? r.resultado : t;
++}
++
++async function exportarCsv() {
++  exportando.value = true;
++  const linhas = await cadenaBuscarTudo<CadenaAcaoPainel>(fetchAcoesPainel as any, {
++    usuario: filtro.value.trim() || undefined
++  });
++  cadenaBaixarCsv(
++    'acoes-no-painel',
++    [
++      { titulo: 'Quando', valor: r => r.created_at },
++      { titulo: 'Usuário', valor: r => r.usuario },
++      { titulo: 'Ação', valor: r => r.acao },
++      { titulo: 'Alvo', valor: r => r.alvo },
++      { titulo: 'Resultado', valor: r => (r.sucesso ? 'ok' : `falhou: ${resultado(r)}`) },
++      { titulo: 'IP', valor: r => r.ip },
++      { titulo: 'Detalhes', valor: r => r.detalhes }
++    ],
++    linhas
++  );
++  exportando.value = false;
++}
++
++const colunas: DataTableColumns<CadenaAcaoPainel> = [
++  { key: 'created_at', title: 'Quando', align: 'center', width: 170 },
++  { key: 'usuario', title: 'Usuário', align: 'center', width: 140, render: r => r.usuario || '—' },
++  { key: 'acao', title: 'Ação', minWidth: 190 },
++  { key: 'alvo', title: 'Alvo', minWidth: 200, ellipsis: { tooltip: true }, render: r => r.alvo || '—' },
++  {
++    key: 'sucesso',
++    title: 'Resultado',
++    align: 'center',
++    width: 260,
++    render: r =>
++      r.sucesso ? (
++        <NTag type="success" bordered={false}>
++          ok
++        </NTag>
++      ) : (
++        <NTag type="error" bordered={false}>
++          {resultado(r) || 'falhou'}
++        </NTag>
++      )
++  },
++  { key: 'ip', title: 'IP', align: 'center', width: 250, ellipsis: { tooltip: true } },
++  { key: 'detalhes', title: 'Detalhes', minWidth: 260, ellipsis: { tooltip: true }, render: r => r.detalhes || '—' }
++];
++
++onMounted(carregar);
++</script>
++
++<template>
++  <NCard :bordered="false" size="small" class="card-wrapper">
++    <template #header>Ações no painel</template>
++    <template #header-extra>
++      <NSpace align="center" wrap justify="end">
++        <NInput v-model:value="filtro" size="small" clearable placeholder="Usuário" class="w-160px" @keyup.enter="pesquisar" @clear="pesquisar" />
++        <NButton size="small" :loading="exportando" @click="exportarCsv">
++          <template #icon>
++            <icon-mdi-file-delimited-outline class="text-icon" />
++          </template>
++          Exportar CSV
++        </NButton>
++        <NButton size="small" @click="pesquisar">
++          <template #icon>
++            <icon-mdi-refresh class="text-icon" :class="{ 'animate-spin': carregando }" />
++          </template>
++          {{ $t('common.refresh') }}
++        </NButton>
++      </NSpace>
++    </template>
++    <p class="pb-12px text-13px opacity-80">
++      Tudo o que foi alterado pelo painel (usuários, catálogos, acessos derrubados) e cada entrada no painel, com quem
++      fez, de onde e o resultado. Senhas e códigos nunca são guardados.
++    </p>
++    <NDataTable
++      :columns="colunas"
++      :data="lista"
++      :loading="carregando"
++      :pagination="paginacao"
++      remote
++      size="small"
++      :row-key="row => row.id"
++      :scroll-x="1500"
++    />
++  </NCard>
++</template>
+diff --git a/soybean-admin/src/views/user/list/components/edit.vue b/soybean-admin/src/views/user/list/components/edit.vue
+index 580271e..4964d77 100644
+--- a/soybean-admin/src/views/user/list/components/edit.vue
++++ b/soybean-admin/src/views/user/list/components/edit.vue
+@@ -50,6 +50,7 @@ type Model = Pick<
+   | 'tfa_secret'
+   | 'note'
+   | 'is_admin'
++  | 'auditor'
+   | 'admin_status'
+   | 'status'
+   | 'tfa_code'
+@@ -70,6 +71,7 @@ function createDefaultModel(): Model {
+     note: '',
+     status: 1,
+     is_admin: false,
++    auditor: false,
+     admin_status: 0,
+     tfa_code: ''
+   };
+@@ -188,6 +190,13 @@ watch(visible, () => {
+         <NFormItem :label="$t('dataMap.user.licensed_devices')" path="licensed_devices">
+           <NInputNumber v-model:value="model.licensed_devices" />
+         </NFormItem>
++        <!-- CadenaTech: auditor entra no painel so para ver a auditoria, as gravacoes e os acessos agora -->
++        <NFormItem v-if="!model.is_admin" label="Auditor (só vê a auditoria)" path="auditor">
++          <NSwitch v-model:value="model.auditor">
++            <template #checked>{{ $t('common.yesOrNo.yes') }}</template>
++            <template #unchecked>{{ $t('common.yesOrNo.no') }}</template>
++          </NSwitch>
++        </NFormItem>
+         <NFormItem
+           v-if="!(operateType === 'edit' && model.is_admin)"
+           :label="$t('dataMap.user.is_admin')"
+diff --git a/soybean-admin/src/views/user/list/index.vue b/soybean-admin/src/views/user/list/index.vue
+index fb43776..2f17031 100644
+--- a/soybean-admin/src/views/user/list/index.vue
++++ b/soybean-admin/src/views/user/list/index.vue
+@@ -127,6 +127,14 @@ const {
+             </NTag>
+           );
+         }
++        // CadenaTech: auditor (so ve a auditoria)
++        if (row.auditor) {
++          return (
++            <NTag bordered={false} type={'info'}>
++              Auditor
++            </NTag>
++          );
++        }
+         return <NTag bordered={false}>{$t('common.yesOrNo.no')}</NTag>;
+       }
+     },

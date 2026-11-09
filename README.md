@@ -13,7 +13,7 @@ O repositório **não traz uma cópia do RustDesk**. Os scripts baixam o código
 **Dois programas para Windows e Android**, gerados do mesmo código:
 
 - **Cadena Suporte** (Cliente), instalado no computador atendido. Só recebe acesso. Cada conexão abre uma janela de aprovação com um aviso contra golpes; o Android mostra o mesmo aviso. Há também um instalador silencioso que já define senha e ID.
-- **Cadena Técnico**, para quem atende. Só acessa e exige login na conta da API. A aba **Grupo** lista os computadores dos clientes. Cada acesso é gravado, e as gravações podem ir sozinhas para um servidor FTP (Configurações > Geral, com endereço para a rede local e para fora).
+- **Cadena Técnico**, para quem atende. Só acessa e exige login na conta da API. A tela inicial tem uma lateral com Clientes, Recentes, Favoritos e Catálogos, a conta e o status dos servidores, e cartões por computador (sistema, online, favorito, Conectar); em janela estreita a lateral fica só com os ícones. Clientes lista os computadores dos clientes. Cada acesso é gravado, e as gravações podem ir sozinhas para um servidor FTP (Configurações > Geral, com endereço para a rede local e para fora).
 
 **Servidor próprio, com reserva automática.** O servidor e a chave vão embutidos e travados no programa. Um segundo servidor é opcional:
 
@@ -30,6 +30,8 @@ O repositório **não traz uma cópia do RustDesk**. Os scripts baixam o código
 - tela de acessos em andamento;
 - registro de acessos com técnico, hora final e as gravações enviadas por FTP (botão Assistir, em `pastasGravacoes`);
 - derrubar um acesso pelo painel (Acessos agora > Desconectar), alertas de segurança enviados pelos Clientes e limpeza automática de registros e gravações (`diasRegistros`, `diasGravacoes`);
+- registro das ações do painel (quem criou, editou ou excluiu algo e cada entrada no painel, sem senhas) e exportação para CSV nas telas de auditoria;
+- 2FA (código do autenticador) no login do painel para quem tem "2FA" em Verificação no login, e o papel **auditor**, que entra no painel só para ver a auditoria, as gravações e os acessos agora;
 - bloqueio de login depois de tentativas erradas;
 - **PostgreSQL**, além de SQLite e MySQL, e o comando `migrate-db` para migrar os dados.
 
