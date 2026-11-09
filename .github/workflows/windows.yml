@@ -1,4 +1,4 @@
-# Compila o Cliente e o Tecnico do Windows (e o instalador silencioso) a partir deste repositorio e, se o
+# Compila o Cliente e o Tecnico do Windows a partir deste repositorio e, se o
 # SignPath estiver configurado, envia os executaveis para assinatura de codigo.
 #
 # Configuracao em Settings > Secrets and variables > Actions:
@@ -98,18 +98,14 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: windows-nao-assinado
-          path: |
-            C:/cb/entrega/*-install.exe
-            C:/cb/entrega/Instalar*.exe
+          path: C:/cb/entrega/*-install.exe
           if-no-files-found: error
 
-      - name: Fonte correspondente (AGPL) e atalhos do tecnico
+      - name: Fonte correspondente (AGPL)
         uses: actions/upload-artifact@v6
         with:
-          name: fonte-e-atalhos
-          path: |
-            C:/cb/entrega/fonte/
-            C:/cb/entrega/*.bat
+          name: fonte
+          path: C:/cb/entrega/fonte/
           if-no-files-found: error
 
       # So depois que o projeto for aprovado no SignPath (https://signpath.org) e as variaveis forem definidas

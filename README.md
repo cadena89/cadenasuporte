@@ -12,7 +12,7 @@ O repositório **não traz uma cópia do RustDesk**. Os scripts baixam o código
 
 **Dois programas para Windows e Android**, gerados do mesmo código:
 
-- **Cadena Suporte** (Cliente), instalado no computador atendido. Só recebe acesso. Cada conexão abre uma janela de aprovação com um aviso contra golpes; o Android mostra o mesmo aviso. Há também um instalador silencioso que já define senha e ID.
+- **Cadena Suporte** (Cliente), instalado no computador atendido. Só recebe acesso. Cada conexão abre uma janela de aprovação com um aviso contra golpes; o Android mostra o mesmo aviso.
 - **Cadena Técnico**, para quem atende. Só acessa e exige login na conta da API. A tela inicial tem uma lateral com Clientes, Recentes, Favoritos e Catálogos, a conta e o status dos servidores, e cartões por computador (sistema, online, favorito, Conectar); em janela estreita a lateral fica só com os ícones. Clientes lista os computadores dos clientes. Cada acesso é gravado, e as gravações podem ir sozinhas para um servidor FTP (Configurações > Geral, com endereço para a rede local e para fora).
 
 **Servidor próprio, com reserva automática.** O servidor e a chave vão embutidos e travados no programa. Um segundo servidor é opcional:
@@ -47,11 +47,10 @@ scripts/                compilacao do app (Windows e Android)
   3_dependencias.ps1    bibliotecas C (vcpkg) e geradores da ponte Flutter/Rust
   4_compilar.ps1        compila (build.py --flutter)
   6_empacotar.ps1       instalador unico + pacote de fonte da AGPL (patches)
-  8_compilar_perfis.ps1 Tecnico e Cliente, atalhos .bat e instalador silencioso
+  8_compilar_perfis.ps1 Tecnico e Cliente
   9_publicar.ps1        release com versao.assinado (atualizacao automatica)
   gerar_chave_atualizacao.ps1  par de chaves Ed25519 da atualizacao (guardado fora do repositorio)
-  modelos/              modulo de FTP (Rust), tela do FTP (Dart), .bat do tecnico
-  instalador-silencioso/  instalador do Cliente (C#, .NET Framework)
+  modelos/              modulo de FTP (Rust), tela do FTP e tela inicial do Tecnico (Dart)
   android/              compilacao do Android num WSL (Ubuntu) dedicado
 api/                    API e painel: cadena-api.patch, pt-br.ts, atualizar_api.ps1, exemplos de configuracao
 config.exemplo.psd1     modelo da configuracao local (copie para config.local.psd1)
@@ -135,8 +134,6 @@ A assinatura fica com a [SignPath Foundation](https://signpath.org), que oferece
 A partir daí, cada execução envia os executáveis ao SignPath e publica também o artefato `windows-assinado`.
 
 A chave **privada** da atualização automática nunca vai para o GitHub. Para montar a release, baixe os executáveis assinados para a pasta de entrega e rode `scripts\9_publicar.ps1 -SemCompilar` na máquina que guarda a chave.
-
-**Limitação conhecida:** o `Instalar*.exe` (instalador silencioso) leva dentro uma cópia do Cliente feita antes da assinatura. Só o arquivo de fora sai assinado.
 
 ## Licença e créditos
 

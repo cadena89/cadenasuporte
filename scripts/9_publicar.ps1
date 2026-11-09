@@ -31,7 +31,7 @@ $Arquivos = @{
   ($Cliente.ToLower()) = "$Cliente-$Versao-install.exe"
   ($Tecnico.ToLower()) = "$Tecnico-$Versao-install.exe"
 }
-foreach ($a in $Arquivos.Values + "$Cliente-$Versao-portatil.exe", "$Tecnico-$Versao-portatil.exe", "Instalar$Cliente.exe", 'DefinirNomeTecnico.bat', 'ConfigurarFTP.bat') {
+foreach ($a in $Arquivos.Values + "$Cliente-$Versao-portatil.exe", "$Tecnico-$Versao-portatil.exe") {
   Copy-Item -Force "$Entrega\$a" "$Pasta\$a"
 }
 # APKs do Android da mesma versao, para o download pelo celular (o Android nao se atualiza sozinho)

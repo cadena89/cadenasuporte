@@ -1,6 +1,6 @@
 
 // CadenaTech: envio das gravacoes do Tecnico por FTP, em Configuracoes > Geral. O 2_marca.ps1 junta este
-// arquivo ao desktop_setting_page.dart. Grava o mesmo <prefixo>-ftp.txt do ConfigurarFTP.bat (src/cadena_ftp.rs),
+// arquivo ao desktop_setting_page.dart. Grava o <prefixo>-ftp.txt lido pelo src/cadena_ftp.rs,
 // pelo mainGetCommon / mainSetCommon. A senha nunca volta para a tela: em branco, mantem a atual.
 class _CadenaFtp extends StatefulWidget {
   const _CadenaFtp({Key? key}) : super(key: key);

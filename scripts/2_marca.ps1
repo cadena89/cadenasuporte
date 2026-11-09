@@ -372,7 +372,7 @@ fn cadena_perfil() -> serde_json::Value {
     if tecnico {
         padrao["allow-auto-record-outgoing"] = "Y".into();
     } else {
-        // O cliente aprova cada acesso na janela que traz o aviso da marca; o instalador silencioso troca para senha ou clique
+        // O cliente aprova cada acesso na janela que traz o aviso da marca
         padrao["approve-mode"] = "click".into();
         // A aba "Grupo" (computadores dos clientes, vindos da API) so existe no Tecnico
         travas["disable-group-panel"] = "Y".into();
@@ -506,7 +506,7 @@ Trocar "$Fonte\src\common.rs" @{
 # em memoria e o sobrescreveria. Sem o arquivo, o cliente continua vendo o usuario do Windows
 $NomeCmd = @'
     // CadenaTech: grava o nome do tecnico, mostrado na janela do cliente a cada conexao (--__PREFIXO__-nome),
-    // e testa o envio das gravacoes por FTP configurado pelo ConfigurarFTP.bat (--__PREFIXO__-ftp-teste)
+    // e testa o envio das gravacoes por FTP (--__PREFIXO__-ftp-teste, o mesmo teste da tela de configuracoes)
     if args.len() > 0 && (args[0] == "--__PREFIXO__-nome" || args[0] == "--__PREFIXO__-ftp-teste") {
         let texto = if args[0] == "--__PREFIXO__-ftp-teste" {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

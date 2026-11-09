@@ -2,7 +2,7 @@
 // com o prefixo de arquivos e o nome do Tecnico da marca.
 //
 // Liga quando existe __PREFIXO__-ftp.txt na pasta de configuracao do app, gravado pela tela Configuracoes > Geral do
-// Tecnico ou pelo ConfigurarFTP.bat:
+// Tecnico:
 //   servidor_local=192.168.0.10:21     (opcional: tentado primeiro, com prazo curto, dentro do escritorio)
 //   servidor=ftp.exemplo.com.br:21       (externo: usado quando o local nao responde)
 //   usuario=...
@@ -306,7 +306,7 @@ fn enviar_arquivo(c: &Configuracao, arquivo: &Path) -> ResultType<String> {
 }
 
 /// Nome do tecnico para o arquivo no servidor, na mesma ordem do nome mostrado ao cliente: o do
-/// DefinirNomeTecnico.bat, o nome da conta logada na API e, por ultimo, o usuario do Windows.
+/// arquivo __PREFIXO__-nome-tecnico.txt (de versoes antigas), o nome da conta logada na API e, por ultimo, o usuario do Windows.
 /// Fica em minusculas, sem acentos e sem espacos
 fn nome_tecnico() -> String {
     const DE: &str = "\u{e1}\u{e0}\u{e2}\u{e3}\u{e4}\u{e9}\u{e8}\u{ea}\u{eb}\u{ed}\u{ec}\u{ee}\u{ef}\u{f3}\u{f2}\u{f4}\u{f5}\u{f6}\u{fa}\u{f9}\u{fb}\u{fc}\u{e7}\u{f1}";
@@ -346,7 +346,7 @@ fn nome_tecnico() -> String {
     }
 }
 
-/// Teste (tela de configuracoes ou ConfigurarFTP.bat): conecta, envia um arquivo pequeno, confere e apaga
+/// Teste (tela de configuracoes): conecta, envia um arquivo pequeno, confere e apaga
 pub fn testar() -> String {
     let Some(c) = ler_configuracao() else {
         return "O envio das grava\u{e7}\u{f5}es por FTP n\u{e3}o est\u{e1} configurado.\n\nPreencha em Configura\u{e7}\u{f5}es > Geral > Envio das grava\u{e7}\u{f5}es (FTP).".to_owned();
