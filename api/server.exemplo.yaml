@@ -25,3 +25,5 @@ jobsConfig:
     duration: 30
 cadena:
   grupoClientes: "Clientes"   # nome do grupo da aba "Grupo" do Tecnico
+  pastasGravacoes:            # onde o FTP recebe as gravacoes do Tecnico (botao Assistir do Registro de acessos)
+    - 'D:\ftp\gravacoes'

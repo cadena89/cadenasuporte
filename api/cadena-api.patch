@@ -1125,10 +1125,27 @@ index 536b4c4..6cb774a 100644
  	UpdatedAt           time.Time `xorm:"'updated_at' datetime updated"`
  }
 diff --git a/backend/app/route.go b/backend/app/route.go
-index 954eafa..dc5ad73 100644
+index 954eafa..cade57f 100644
 --- a/backend/app/route.go
 +++ b/backend/app/route.go
-@@ -43,5 +43,6 @@ func SetRoute(app *iris.Application) {
+@@ -3,6 +3,7 @@ package app
+ import (
+ 	"rustdesk-api-server-pro/app/controller/admin"
+ 	"rustdesk-api-server-pro/app/controller/api"
++	"rustdesk-api-server-pro/app/gravacoes"
+ 	"rustdesk-api-server-pro/app/middleware"
+ 
+ 	"github.com/kataras/iris/v12"
+@@ -30,6 +31,8 @@ func SetRoute(app *iris.Application) {
+ 	adminParty := app.Party("/admin")
+ 	adminMvc := mvc.New(adminParty)
+ 	adminMvc.Handle(new(admin.AuthController))
++	// CadenaTech: video das gravacoes, por link assinado (o <video> nao manda o token do painel)
++	adminParty.Get("/cadena/gravacao", gravacoes.Servir)
+ 
+ 	adminWithAuthParty := app.Party("/admin")
+ 	adminWithAuthParty.Use(middleware.AdminAuth(app))
+@@ -43,5 +46,6 @@ func SetRoute(app *iris.Application) {
  		adminWithAuthMvc.Handle(new(admin.MailTemplateController))
  		adminWithAuthMvc.Handle(new(admin.MaiLogsController))
  		adminWithAuthMvc.Handle(new(admin.DevicesController))
@@ -1347,10 +1364,10 @@ index 3adc23a..dcf57ca 100644
  			fmt.Println("Db init error:", err)
 diff --git a/backend/config/cadena.go b/backend/config/cadena.go
 new file mode 100644
-index 0000000..8c8c5fe
+index 0000000..e48cd56
 --- /dev/null
 +++ b/backend/config/cadena.go
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,129 @@
 +package config
 +
 +// CadenaTech: opcoes proprias e configuracao por variaveis de ambiente.
@@ -1361,6 +1378,7 @@ index 0000000..8c8c5fe
 +//   RUSTDESK_API_DB_DSN      ex.: postgres://usuario:senha@127.0.0.1:5432/cadenasuporte?sslmode=disable
 +//   RUSTDESK_API_SIGN_KEY    chave que assina os tokens
 +//   RUSTDESK_API_GRUPO_CLIENTES  nome do grupo da aba "Grupo" do Tecnico (padrao "Clientes")
++//   RUSTDESK_API_PASTAS_GRAVACOES  pastas das gravacoes enviadas por FTP, separadas por ";"
 +
 +import (
 +	"bufio"
@@ -1373,6 +1391,21 @@ index 0000000..8c8c5fe
 +type CadenaConfig struct {
 +	// Nome do grupo em que aparecem, na aba "Grupo" do Tecnico, os computadores dos clientes
 +	GrupoClientes string `yaml:"grupoClientes"`
++	// Pastas onde chegam as gravacoes enviadas pelo Tecnico (FTP), mostradas no Registro de acessos
++	PastasGravacoes []string `yaml:"pastasGravacoes"`
++}
++
++// PastasGravacoes devolve as pastas das gravacoes (server.yaml ou RUSTDESK_API_PASTAS_GRAVACOES)
++func PastasGravacoes() []string {
++	r := make([]string, 0)
++	if cfg := GetServerConfig(); cfg.Cadena != nil {
++		for _, p := range cfg.Cadena.PastasGravacoes {
++			if p = strings.TrimSpace(p); p != "" {
++				r = append(r, p)
++			}
++		}
++	}
++	return r
 +}
 +
 +var (
@@ -1432,6 +1465,12 @@ index 0000000..8c8c5fe
 +			cfg.Cadena = &CadenaConfig{}
 +		}
 +		cfg.Cadena.GrupoClientes = v
++	}
++	if v := os.Getenv("RUSTDESK_API_PASTAS_GRAVACOES"); v != "" {
++		if cfg.Cadena == nil {
++			cfg.Cadena = &CadenaConfig{}
++		}
++		cfg.Cadena.PastasGravacoes = strings.Split(v, ";")
 +	}
 +	cfg.Db.Driver = NormalizarDriver(cfg.Db.Driver)
 +}
@@ -3022,10 +3061,17 @@ index 0000000..48df1a8
 +  </NCard>
 +</template>
 diff --git a/backend/app/controller/admin/audit.go b/backend/app/controller/admin/audit.go
-index 3447296..a81afc1 100644
+index 3447296..19113c9 100644
 --- a/backend/app/controller/admin/audit.go
 +++ b/backend/app/controller/admin/audit.go
-@@ -7,6 +7,7 @@ import (
+@@ -1,12 +1,14 @@
+ package admin
+ 
+ import (
++	"rustdesk-api-server-pro/app/gravacoes"
+ 	"rustdesk-api-server-pro/app/model"
+ 	"rustdesk-api-server-pro/config"
+ 	"rustdesk-api-server-pro/db"
  
  	"github.com/kataras/iris/v12"
  	"github.com/kataras/iris/v12/mvc"
@@ -3033,10 +3079,25 @@ index 3447296..a81afc1 100644
  	"xorm.io/xorm"
  )
  
-@@ -72,6 +73,16 @@ func (c *AuditController) HandleList() mvc.Result {
+@@ -70,8 +72,31 @@ func (c *AuditController) HandleList() mvc.Result {
+ 		return c.Error(nil, err.Error())
+ 	}
  
++	// CadenaTech: gravacoes de cada acesso (pastas do FTP), com link assinado para o video
++	todasGravacoes := gravacoes.Listar()
  	list := make([]iris.Map, 0)
  	for _, a := range auditList {
++		videos := make([]iris.Map, 0)
++		for _, g := range gravacoes.DoAcesso(todasGravacoes, a.RustdeskId, a.CreatedAt, a.ClosedAt) {
++			videos = append(videos, iris.Map{
++				"nome":    g.Nome,
++				"tecnico": g.Tecnico,
++				"tela":    g.Tela,
++				"inicio":  g.Inicio.Format(config.TimeFormat),
++				"tamanho": g.Tamanho,
++				"url":     gravacoes.Link(g.Nome),
++			})
++		}
 +		// CadenaTech: o fim vem do "close" do programa; a data zero (conexao ainda aberta ou sem fechamento) fica vazia
 +		fim := ""
 +		if a.ClosedAt.Year() > 1970 {
@@ -3050,7 +3111,7 @@ index 3447296..a81afc1 100644
  		list = append(list, iris.Map{
  			"id":          a.Id,
  			"conn_id":     a.ConnId,
-@@ -80,7 +91,10 @@ func (c *AuditController) HandleList() mvc.Result {
+@@ -80,7 +105,11 @@ func (c *AuditController) HandleList() mvc.Result {
  			"session_id":  a.SessionId,
  			"uuid":        a.Uuid,
  			"type":        a.Type,
@@ -3058,14 +3119,23 @@ index 3447296..a81afc1 100644
 +			"tecnico_id":  gjson.Get(a.Peer, "0").String(),
  			"created_at":  a.CreatedAt.Format(config.TimeFormat),
 +			"closed_at":   fim,
++			"gravacoes":   videos,
  		})
  	}
  	return c.Success(iris.Map{
 diff --git a/soybean-admin/src/views/audit/baseLogs/index.vue b/soybean-admin/src/views/audit/baseLogs/index.vue
-index 5cfa31e..8232829 100644
+index 5cfa31e..38f453d 100644
 --- a/soybean-admin/src/views/audit/baseLogs/index.vue
 +++ b/soybean-admin/src/views/audit/baseLogs/index.vue
-@@ -77,6 +77,13 @@ const {
+@@ -1,5 +1,6 @@
+ <script setup lang="tsx">
+-import { NTag } from 'naive-ui';
++import { computed, ref } from 'vue';
++import { NButton, NTag } from 'naive-ui';
+ import { fetchAuditLogList } from '@/service/api/audit';
+ import { $t } from '@/locales';
+ import { useAppStore } from '@/store/modules/app';
+@@ -77,6 +78,13 @@ const {
        title: $t('dataMap.audit.rustdesk_id'),
        align: 'center'
      },
@@ -3079,16 +3149,308 @@ index 5cfa31e..8232829 100644
      {
        key: 'ip',
        title: $t('dataMap.audit.ip'),
+@@ -101,9 +109,48 @@ const {
+       key: 'closed_at',
+       title: $t('dataMap.audit.closed_at'),
+       align: 'center'
++    },
++    {
++      // CadenaTech: video do acesso, gravado pelo Tecnico e enviado ao FTP
++      key: 'gravacoes',
++      title: 'Gravação',
++      align: 'center',
++      width: 130,
++      render: row =>
++        row.gravacoes && row.gravacoes.length > 0 ? (
++          <NButton size="small" type="primary" ghost onClick={() => abrirGravacoes(row)}>
++            {{
++              icon: () => <icon-mdi-play-circle-outline class="text-icon" />,
++              default: () => (row.gravacoes!.length > 1 ? `Assistir (${row.gravacoes!.length})` : 'Assistir')
++            }}
++          </NButton>
++        ) : (
++          '—'
++        )
+     }
+   ]
+ });
++
++// CadenaTech: player das gravacoes de um acesso. Um acesso pode ter mais de um arquivo (reconexao ou outra tela);
++// abre o maior, que costuma ser o acesso inteiro
++const baseServico = import.meta.env.VITE_SERVICE_BASE_URL || '';
++const modalVideo = ref(false);
++const acessoVideo = ref<Api.Audit.AuditLog | null>(null);
++const videoAtual = ref<Api.Audit.Gravacao | null>(null);
++
++function abrirGravacoes(row: Api.Audit.AuditLog) {
++  const lista = row.gravacoes || [];
++  acessoVideo.value = row;
++  videoAtual.value = lista.reduce<Api.Audit.Gravacao | null>((maior, g) => (!maior || g.tamanho > maior.tamanho ? g : maior), null);
++  modalVideo.value = true;
++}
++
++function tamanhoLegivel(bytes: number) {
++  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
++  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
++}
++
++const linkVideo = computed(() => (videoAtual.value ? baseServico + videoAtual.value.url : ''));
+ </script>
+ 
+ <template>
+@@ -119,7 +166,7 @@ const {
+         :data="data"
+         size="small"
+         :flex-height="!appStore.isMobile"
+-        :scroll-x="962"
++        :scroll-x="1100"
+         :loading="loading"
+         remote
+         :row-key="row => row.id"
+@@ -127,6 +174,37 @@ const {
+         class="sm:h-full"
+       />
+     </NCard>
++
++    <NModal
++      v-model:show="modalVideo"
++      preset="card"
++      :title="acessoVideo ? `Gravação do acesso ${acessoVideo.id} · ${acessoVideo.tecnico || ''} → ${acessoVideo.rustdesk_id}` : 'Gravação'"
++      class="w-960px max-w-95vw"
++    >
++      <video v-if="linkVideo" :key="linkVideo" :src="linkVideo" controls autoplay class="w-full max-h-70vh bg-black" />
++      <div v-if="acessoVideo && (acessoVideo.gravacoes || []).length > 1" class="pt-12px">
++        <div class="pb-6px text-13px opacity-80">Arquivos deste acesso:</div>
++        <NSpace size="small">
++          <NButton
++            v-for="g in acessoVideo.gravacoes"
++            :key="g.nome"
++            size="small"
++            :type="videoAtual && videoAtual.nome === g.nome ? 'primary' : 'default'"
++            @click="videoAtual = g"
++          >
++            {{ g.inicio.slice(11) }} · tela {{ Number(g.tela) + 1 }} · {{ tamanhoLegivel(g.tamanho) }}
++          </NButton>
++        </NSpace>
++      </div>
++      <template #footer>
++        <NSpace justify="space-between" align="center">
++          <span class="text-12px opacity-70">{{ videoAtual ? videoAtual.nome : '' }}</span>
++          <a v-if="linkVideo" :href="linkVideo" :download="videoAtual ? videoAtual.nome : undefined">
++            <NButton size="small">Baixar</NButton>
++          </a>
++        </NSpace>
++      </template>
++    </NModal>
+   </div>
+ </template>
+ 
 diff --git a/soybean-admin/src/typings/api.d.ts b/soybean-admin/src/typings/api.d.ts
-index 1513bc1..f0d8d88 100644
+index 1513bc1..82f2746 100644
 --- a/soybean-admin/src/typings/api.d.ts
 +++ b/soybean-admin/src/typings/api.d.ts
-@@ -142,6 +142,8 @@ declare namespace Api {
+@@ -134,6 +134,15 @@ declare namespace Api {
+   }
+ 
+   namespace Audit {
++    /** CadenaTech: gravacao de um acesso, com link assinado do video (relativo ao /admin) */
++    interface Gravacao {
++      nome: string;
++      tecnico: string;
++      tela: string;
++      inicio: string;
++      tamanho: number;
++      url: string;
++    }
+     type AuditLog = Common.CommonRecord<{
+       username: string;
+       conn_id: string;
+@@ -142,7 +151,10 @@ declare namespace Api {
        session_id: string;
        uuid: string;
        type: number;
 +      tecnico?: string;
 +      tecnico_id?: string;
        closed_at?: string;
++      gravacoes?: Gravacao[];
      }>;
      type AuditLogList = Common.PaginatingQueryRecord<AuditLog>;
+     type AuditLogSearchParams = CommonType.RecordNullable<
+diff --git a/backend/app/gravacoes/gravacoes.go b/backend/app/gravacoes/gravacoes.go
+new file mode 100644
+index 0000000..2ebb851
+--- /dev/null
++++ b/backend/app/gravacoes/gravacoes.go
+@@ -0,0 +1,172 @@
++package gravacoes
++
++// CadenaTech: gravacoes dos acessos, enviadas pelo Tecnico ao FTP da empresa (cadena_ftp.rs), mostradas no
++// Registro de acessos do painel. Os nomes chegam assim:
++//   <tecnico>_outgoing_<id do computador>_<AAAAMMDDhhmmssmmm>_display<n>_<codec>.webm
++// A gravacao pertence a um acesso quando o ID e o mesmo e o inicio dela cai entre o inicio e o fim do acesso
++// (com folga, porque o relogio do Tecnico e o do servidor nao sao iguais).
++//
++// As pastas vem de cadena.pastasGravacoes no server.yaml ou de RUSTDESK_API_PASTAS_GRAVACOES (separadas por ";").
++// O <video> do navegador nao manda o token do painel, entao o painel recebe um link assinado (HMAC com o signKey)
++// que vale por algumas horas e serve so aquele arquivo.
++
++import (
++	"crypto/hmac"
++	"crypto/sha256"
++	"encoding/hex"
++	"net/http"
++	"net/url"
++	"os"
++	"path/filepath"
++	"regexp"
++	"sort"
++	"strconv"
++	"strings"
++	"time"
++
++	"rustdesk-api-server-pro/config"
++
++	"github.com/kataras/iris/v12"
++)
++
++const (
++	folgaAntes  = 2 * time.Minute
++	folgaDepois = 2 * time.Minute
++	// Acesso sem fim registrado: considera no maximo este tempo depois do inicio
++	semFim = 12 * time.Hour
++	// Validade do link do video
++	Validade = 3 * time.Hour
++)
++
++var padrao = regexp.MustCompile(`^(.+)_(outgoing|incoming)_([0-9A-Za-z]+)_(\d{17})_display(\d+)_([0-9A-Za-z]+)\.(webm|mp4)$`)
++
++type Gravacao struct {
++	Nome       string
++	Caminho    string
++	Tamanho    int64
++	Inicio     time.Time
++	Tecnico    string
++	RustdeskId string
++	Tela       string
++}
++
++// Listar le as pastas configuradas. Um nome que nao segue o padrao e ignorado
++func Listar() []Gravacao {
++	lista := make([]Gravacao, 0)
++	for _, pasta := range config.PastasGravacoes() {
++		itens, err := os.ReadDir(pasta)
++		if err != nil {
++			continue
++		}
++		for _, it := range itens {
++			if it.IsDir() {
++				continue
++			}
++			g, ok := ler(pasta, it.Name())
++			if !ok {
++				continue
++			}
++			if info, err := it.Info(); err == nil {
++				g.Tamanho = info.Size()
++			}
++			lista = append(lista, g)
++		}
++	}
++	sort.Slice(lista, func(i, j int) bool { return lista[i].Inicio.Before(lista[j].Inicio) })
++	return lista
++}
++
++func ler(pasta, nome string) (Gravacao, bool) {
++	m := padrao.FindStringSubmatch(nome)
++	if m == nil {
++		return Gravacao{}, false
++	}
++	inicio, err := time.ParseInLocation("20060102150405", m[4][:14], time.Local)
++	if err != nil {
++		return Gravacao{}, false
++	}
++	ms, _ := strconv.Atoi(m[4][14:])
++	return Gravacao{
++		Nome:       nome,
++		Caminho:    filepath.Join(pasta, nome),
++		Inicio:     inicio.Add(time.Duration(ms) * time.Millisecond),
++		Tecnico:    m[1],
++		RustdeskId: m[3],
++		Tela:       m[5],
++	}, true
++}
++
++// horaLocal reinterpreta o horario lido do banco (que pode vir marcado como UTC) no fuso do servidor
++func horaLocal(t time.Time) time.Time {
++	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.Local)
++}
++
++// DoAcesso devolve as gravacoes de um acesso
++func DoAcesso(lista []Gravacao, rustdeskId string, inicio, fim time.Time) []Gravacao {
++	ini := horaLocal(inicio)
++	ate := ini.Add(semFim)
++	if fim.Year() > 1970 {
++		ate = horaLocal(fim)
++	}
++	de, ate := ini.Add(-folgaAntes), ate.Add(folgaDepois)
++	r := make([]Gravacao, 0)
++	for _, g := range lista {
++		if g.RustdeskId == rustdeskId && !g.Inicio.Before(de) && !g.Inicio.After(ate) {
++			r = append(r, g)
++		}
++	}
++	return r
++}
++
++func assinatura(nome string, expira int64) string {
++	mac := hmac.New(sha256.New, []byte("cadena-gravacao:"+config.GetServerConfig().SignKey))
++	mac.Write([]byte(nome + "|" + strconv.FormatInt(expira, 10)))
++	return hex.EncodeToString(mac.Sum(nil))
++}
++
++// Link devolve o caminho do video relativo a /admin, com assinatura e validade
++func Link(nome string) string {
++	expira := time.Now().Add(Validade).Unix()
++	q := url.Values{}
++	q.Set("f", nome)
++	q.Set("e", strconv.FormatInt(expira, 10))
++	q.Set("s", assinatura(nome, expira))
++	return "/cadena/gravacao?" + q.Encode()
++}
++
++// Servir entrega o video (com suporte a Range, para o player avancar e voltar). Rota sem login: vale a assinatura
++func Servir(ctx iris.Context) {
++	nome := ctx.URLParam("f")
++	expira, _ := strconv.ParseInt(ctx.URLParam("e"), 10, 64)
++	s := ctx.URLParam("s")
++	if nome == "" || nome != filepath.Base(nome) || strings.ContainsAny(nome, `\/:`) || expira < time.Now().Unix() ||
++		!hmac.Equal([]byte(s), []byte(assinatura(nome, expira))) {
++		ctx.StopWithStatus(http.StatusForbidden)
++		return
++	}
++	for _, pasta := range config.PastasGravacoes() {
++		g, ok := ler(pasta, nome)
++		if !ok {
++			break
++		}
++		f, err := os.Open(g.Caminho)
++		if err != nil {
++			continue
++		}
++		info, err := f.Stat()
++		if err != nil || info.IsDir() {
++			f.Close()
++			continue
++		}
++		tipo := "video/webm"
++		if strings.HasSuffix(nome, ".mp4") {
++			tipo = "video/mp4"
++		}
++		ctx.ResponseWriter().Header().Set("Content-Type", tipo)
++		ctx.ResponseWriter().Header().Set("Cache-Control", "private, max-age=3600")
++		http.ServeContent(ctx.ResponseWriter(), ctx.Request(), nome, info.ModTime(), f)
++		f.Close()
++		return
++	}
++	ctx.StopWithStatus(http.StatusNotFound)
++}

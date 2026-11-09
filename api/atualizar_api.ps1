@@ -138,7 +138,16 @@ if ($Pm2) { & $Pm2 stop $Processo | Out-Null }
 if (Test-Path "$Instalado\server.db") { Copy-Item -Force "$Instalado\server.db" "$Instalado\server.db.antes-da-atualizacao" }
 if (Test-Path "$Instalado\dist") { Remove-Item -Recurse -Force "$Instalado\dist" }
 Copy-Item -Recurse "$Painel\dist" "$Instalado\dist"
-Copy-Item -Force "$Fonte\build\rustdesk-api-server-pro.exe" "$Instalado\rustdesk-api-server-pro.exe"
+# O pm2 stop nao solta o exe na hora: tenta de novo por ate 60 s e, se nao der, sobe o servico antes de parar
+$copiado = $false
+for ($i = 0; $i -lt 60 -and -not $copiado; $i++) {
+  try { Copy-Item -Force "$Fonte\build\rustdesk-api-server-pro.exe" "$Instalado\rustdesk-api-server-pro.exe" -ErrorAction Stop; $copiado = $true }
+  catch { Start-Sleep -Seconds 1 }
+}
+if (-not $copiado) {
+  if ($Pm2) { & $Pm2 start $Processo | Out-Null }
+  throw "nao foi possivel trocar $Instalado\rustdesk-api-server-pro.exe (arquivo em uso)"
+}
 Push-Location $Instalado
 & .\rustdesk-api-server-pro.exe sync
 $codigo = $LASTEXITCODE
