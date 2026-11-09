@@ -635,7 +635,8 @@ Trocar "$Fonte\flutter\lib\desktop\pages\desktop_home_page.dart" @{
 # Atualizacao automatica (Windows instalado). A ultima release de github.com/$RepoAtualizacao traz versao.assinado:
 # base64 de assinatura Ed25519 + versao.json, assinado pelo 9_publicar.ps1 com a chave privada (ChavePrivada). O
 # servico confere a assinatura com a chave publica embutida, compara o numero com o desta compilacao (numero.txt
-# da pasta de entrega), confere o SHA-256 do instalador e reinstala pelo --update
+# da pasta de entrega), confere o SHA-256 do instalador e reinstala pelo --update. O Cliente atualiza calado pelo
+# servico; o Tecnico (sem servico) pergunta na tela e pede a permissao do Windows
 if (-not $RepoAtualizacao -or -not $ChaveAtualizacao) { throw 'Informe RepoAtualizacao e ChavePublica no config.local.psd1 (atualizacao automatica)' }
 if (-not (Test-Path $ArqNumero)) { New-Item -ItemType Directory -Force (Split-Path $ArqNumero) | Out-Null; Set-Content -Encoding ascii $ArqNumero 1 }
 $NumeroVersao = [int](Get-Content $ArqNumero -Raw).Trim()
@@ -717,12 +718,50 @@ fn cadena_atualizar() -> ResultType<()> {
     std::fs::create_dir(&pasta)?;
     let caminho = pasta.join(arquivo);
     std::fs::write(&caminho, &instalador)?;
-    // O update_new_version copia o instalador para uma pasta protegida, confere o SHA-256 de novo e roda o --update
-    if has_no_active_conns() {
+    if !has_no_active_conns() {
+        log::info!("CadenaTech: versao {} adiada, ha sessao aberta", numero);
+    } else if crate::is_server() {
+        // Cliente (servico do Windows, como SYSTEM): o update_new_version copia o instalador para uma pasta
+        // protegida, confere o SHA-256 de novo e roda o --update, sem perguntar nada
         update_new_version(false, &numero.to_string(), &caminho, sha256);
+    } else if cadena_perguntar_atualizar() {
+        // Tecnico: instalado sem servico, roda como o usuario. Usa o mesmo caminho do botao Atualizar do RustDesk,
+        // que confere o SHA-256 e pede a permissao do Windows (UAC) para o --update
+        if let Err(e) = crate::platform::update_to_verified(
+            &caminho.to_string_lossy(),
+            sha256,
+            instalador.len() as u64,
+        ) {
+            log::error!("CadenaTech: falha ao atualizar para a versao {}: {}", numero, e);
+        }
+    } else {
+        log::info!("CadenaTech: versao {} recusada pelo usuario, pergunta de novo mais tarde", numero);
     }
     std::fs::remove_dir_all(&pasta).ok();
     Ok(())
+}
+
+// Tecnico: avisa antes de pedir a permissao do Windows, para o UAC nao aparecer do nada
+#[cfg(target_os = "windows")]
+fn cadena_perguntar_atualizar() -> bool {
+    use winapi::um::winuser::{
+        MessageBoxW, IDYES, MB_ICONQUESTION, MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO,
+    };
+    let nome = crate::common::cadena_nome_exibido();
+    let texto = format!(
+        "Há uma versão nova do {}.\n\nAtualizar agora? O programa fecha e abre de novo sozinho, e o Windows pede permissão para instalar.",
+        nome
+    );
+    let largo = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let (texto, titulo) = (largo(&texto), largo(&nome));
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            texto.as_ptr(),
+            titulo.as_ptr(),
+            MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND,
+        ) == IDYES
+    }
 }
 // CadenaTech: fim da atualizacao propria
 
@@ -733,9 +772,17 @@ Trocar "$Fonte\src\updater.rs" @{ 'fn check_update\(manually: bool\) -> ResultTy
 Trocar "$Fonte\src\updater.rs" @{
   'fn check_update\(manually: bool\) -> ResultType<\(\)> \{' = "fn check_update(manually: bool) -> ResultType<()> {`n    // CadenaTech: cliente customizado nao usa o GitHub do RustDesk, e sim as versoes publicadas em CADENA_REPO`n    #[cfg(target_os = `"windows`")]`n    if crate::is_custom_client() {`n        if !(manually || config::Config::get_bool_option(keys::OPTION_ALLOW_AUTO_UPDATE)) {`n            return Ok(());`n        }`n        return cadena_atualizar();`n    }"
 }
-# O Tecnico (so acessa) parava antes de ligar a verificacao de atualizacao do servico instalado
+# O Tecnico (so acessa) parava antes de ligar a verificacao de atualizacao. Ele e instalado sem servico do Windows
+# (get_create_service pula o outgoing-only), entao nao existe processo --server: o start_all roda dentro da propria
+# janela. Por isso a condicao e "rodando do exe instalado", e nao is_server() (que nunca era verdade no Tecnico)
 Trocar "$Fonte\src\rendezvous_mediator.rs" @{
-  'crate::test_nat_type\(\);\r?\n        if config::is_outgoing_only\(\) \{' = "crate::test_nat_type();`n        // CadenaTech: o Tecnico tambem se atualiza sozinho quando instalado`n        #[cfg(target_os = `"windows`")]`n        if config::is_outgoing_only() && crate::platform::is_installed() && crate::is_server() {`n            crate::updater::start_auto_update();`n        }`n        if config::is_outgoing_only() {"
+  'crate::test_nat_type\(\);\r?\n        if config::is_outgoing_only\(\) \{' = "crate::test_nat_type();`n        // CadenaTech: o Tecnico tambem se atualiza quando instalado (pergunta antes, ver cadena_perguntar_atualizar)`n        #[cfg(target_os = `"windows`")]`n        if config::is_outgoing_only() && crate::platform::is_cur_exe_the_installed() {`n            crate::updater::start_auto_update();`n        }`n        if config::is_outgoing_only() {"
+}
+# Verifica a cada 3 horas (o padrao do RustDesk e 1 vez por dia), para a versao nova chegar no mesmo dia
+Trocar "$Fonte\src\updater.rs" @{
+  'pub const DUR_ONE_DAY: Duration = Duration::from_secs\(60 \* 60 \* 24\);' = "pub const DUR_ONE_DAY: Duration = Duration::from_secs(60 * 60 * 24);`n`n/// CadenaTech: intervalo entre as verificacoes da atualizacao propria (3 horas).`npub const CADENA_INTERVALO: Duration = Duration::from_secs(60 * 60 * 3);"
+  # as duas linhas do laco (a do "let mut" e a que volta ao normal depois de uma verificacao)
+  'check_interval = DUR_ONE_DAY;' = 'check_interval = CADENA_INTERVALO;'
 }
 # Android: sem backup automatico do Google, reinstalar volta o app ao estado inicial, inclusive o aviso de golpe
 Trocar "$Fonte\flutter\android\app\src\main\AndroidManifest.xml" @{
