@@ -577,10 +577,39 @@ Trocar "$Fonte\src\client.rs" @{
 }
 # Instalacao: o pacote portatil entrega rustdesk.exe, mas o servico e os atalhos apontam para <app>.exe.
 # A atualizacao (update_me) ja renomeia; a instalacao (install_me) nao, e o servico nunca iniciava
+# Certificado da marca: a instalacao e a atualizacao (as duas rodam como administrador) gravam o certificado
+# publico em Raiz Confiavel e Editores Confiaveis, para o Windows reconhecer a assinatura dos executaveis.
+# O certificado so assina codigo (EKU) e nao emite outros (CA=0). Sem CertificadoB64, nao grava nada
 Trocar "$Fonte\src\platform\windows.rs" @{
-  'md \\"\{path\}\\"\r?\n\{copy_exe\}\r?\nreg add \{subkey\} /f\r?\n' = "md \`"{path}\`"`n{copy_exe}`n{rename_exe}`nreg add {subkey} /f`n"
-  'copy_exe = copy_exe_cmd\(&src_exe, &exe, &path\)\?,\r?\n        import_config = get_import_config\(&exe\),' = "copy_exe = copy_exe_cmd(&src_exe, &exe, &path)?,`n        rename_exe = rename_exe_cmd(&src_exe, &path)?,`n        import_config = get_import_config(&exe),"
+  'md \\"\{path\}\\"\r?\n\{copy_exe\}\r?\nreg add \{subkey\} /f\r?\n' = "md \`"{path}\`"`n{copy_exe}`n{rename_exe}`n{cadena_confiar}`nreg add {subkey} /f`n"
+  'copy_exe = copy_exe_cmd\(&src_exe, &exe, &path\)\?,\r?\n        import_config = get_import_config\(&exe\),' = "copy_exe = copy_exe_cmd(&src_exe, &exe, &path)?,`n        rename_exe = rename_exe_cmd(&src_exe, &path)?,`n        cadena_confiar = cadena_confiar_cmd(&path),`n        import_config = get_import_config(&exe),"
+  '\{rename_exe\}\r?\n\{remove_meta_toml\}' = "{rename_exe}`n{cadena_confiar}`n{remove_meta_toml}"
+  'rename_exe = rename_exe_cmd\(&src_exe, &path\)\?,\r?\n        remove_meta_toml = ' = "rename_exe = rename_exe_cmd(&src_exe, &path)?,`n        cadena_confiar = cadena_confiar_cmd(&path),`n        remove_meta_toml = "
 }
+$Confiar = @'
+// CadenaTech: grava o certificado da marca como confiavel (Raiz e Editores Confiaveis). Gerado pelo 2_marca.ps1
+const CADENA_CERTIFICADO: &str = "__CERTIFICADO__";
+
+pub fn cadena_confiar_cmd(path: &str) -> String {
+    if CADENA_CERTIFICADO.is_empty() {
+        return "".to_owned();
+    }
+    format!(
+        "
+(echo {CADENA_CERTIFICADO})> \"{path}\\cadena-editor.b64\"
+certutil -f -decode \"{path}\\cadena-editor.b64\" \"{path}\\cadena-editor.cer\" > nul
+certutil -f -addstore Root \"{path}\\cadena-editor.cer\" > nul
+certutil -f -addstore TrustedPublisher \"{path}\\cadena-editor.cer\" > nul
+del /f /q \"{path}\\cadena-editor.b64\"
+"
+    )
+}
+
+#[inline]
+pub fn remove_meta_toml_cmd(
+'@
+$Confiar = ($Confiar -replace "`r`n", "`n").Replace('__CERTIFICADO__', $CertificadoB64)
+Trocar "$Fonte\src\platform\windows.rs" @{ '#\[inline\]\r?\npub fn remove_meta_toml_cmd\(' = $Confiar }
 # Aviso da marca (AvisoJanela) na janela de aceitar o acesso (Windows)
 $AvisoCm = @'
 final showAccept = model.approveMode != 'password';

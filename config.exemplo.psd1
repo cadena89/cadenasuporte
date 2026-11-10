@@ -27,6 +27,12 @@
   ChavePublica    = 'C:\caminho\privado\atualizacao\chave-publica.txt'
   ChavePrivada    = 'C:\caminho\privado\atualizacao\atualizacao.pem'
 
+  # Assinatura de codigo (opcional): certificado autoassinado da marca, gerado uma vez com
+  # scripts\gerar_certificado.ps1. O .cer vai embutido e o instalador o grava como confiavel no computador
+  Certificado      = 'C:\caminho\privado\assinatura-codigo\certificado.cer'
+  CertificadoPfx   = 'C:\caminho\privado\assinatura-codigo\certificado.pfx'
+  CertificadoSenha = 'C:\caminho\privado\assinatura-codigo\senha.txt'
+
   # Assinatura do Android: criada na primeira compilacao se nao existir. Guarde com backup: sem ela, o APK
   # seguinte nao instala por cima do anterior
   AndroidChave  = 'C:\caminho\privado\android\suporte.jks'

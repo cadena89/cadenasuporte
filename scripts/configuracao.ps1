@@ -87,6 +87,15 @@ if (-not $ChaveAtualizacao -and $Cfg.ChavePublica) {
 }
 $ChavePrivada = $Cfg.ChavePrivada
 
+# Certificado de assinatura de codigo da marca (scripts\gerar_certificado.ps1). O publico (.cer) vai embutido no
+# programa, que o grava como confiavel ao instalar e ao atualizar; CI: variavel CADENA_CERTIFICADO (o .cer em base64).
+# A assinatura em si usa CertificadoPfx/CertificadoSenha (ver assinar.ps1)
+$CertificadoB64 = Valor 'CADENA_CERTIFICADO' ''
+if (-not $CertificadoB64 -and $Cfg.Certificado) {
+  $CertificadoB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($Cfg.Certificado))
+}
+if ($CertificadoB64 -notmatch '^[A-Za-z0-9+/=]*$') { throw 'CADENA_CERTIFICADO precisa ser o .cer em base64' }
+
 # Numero da versao da marca: sobe a cada entrega e decide a atualizacao automatica
 $ArqNumero = "$Entrega\numero.txt"
 $ArqNumeroAndroid = "$Entrega\android\numero.txt"

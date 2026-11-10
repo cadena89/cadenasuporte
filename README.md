@@ -122,18 +122,22 @@ Os instaladores do Windows são compilados no GitHub Actions pelo workflow [`.gi
 - servidor principal: `CADENA_SERVIDOR1`, `CADENA_CHAVE1`, `CADENA_NOME1`;
 - segundo servidor, opcional: `CADENA_SERVIDOR2`, `CADENA_CHAVE2`, `CADENA_NOME2`;
 - API: `CADENA_API`;
-- atualização automática: `CADENA_REPO_ATUALIZACAO` e `CADENA_CHAVE_ATUALIZACAO`, a chave **pública**.
+- atualização automática: `CADENA_REPO_ATUALIZACAO` e `CADENA_CHAVE_ATUALIZACAO`, a chave **pública**;
+- certificado da marca: `CADENA_CERTIFICADO`, o `.cer` **público** em base64.
 
 O workflow publica os executáveis como artefatos, junto com o pacote de fonte da AGPL.
 
-A assinatura fica com a [SignPath Foundation](https://signpath.org), que oferece certificados gratuitos para projetos open source. O certificado sai em nome da *SignPath Foundation*. Para ligar a assinatura:
+Os executáveis são assinados com um **certificado autoassinado da marca**. Gere-o uma vez:
 
-1. Peça a adesão do projeto em signpath.org.
-2. Depois da aprovação, defina as variáveis `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` e `SIGNPATH_SIGNING_POLICY_SLUG` e o segredo `SIGNPATH_API_TOKEN`.
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\gerar_certificado.ps1 -Empresa "Minha Empresa" -Pasta C:\caminho\privado\assinatura-codigo
+```
 
-A partir daí, cada execução envia os executáveis ao SignPath e publica também o artefato `windows-assinado`.
+Depois aponte `Certificado`, `CertificadoPfx` e `CertificadoSenha` no `config.local.psd1`. No GitHub, defina os segredos `CADENA_CERTIFICADO_PFX` (o `.pfx` em base64) e `CADENA_CERTIFICADO_SENHA`. Sem eles, os executáveis saem sem assinatura.
 
-A chave **privada** da atualização automática nunca vai para o GitHub. Para montar a release, baixe os executáveis assinados para a pasta de entrega e rode `scripts\9_publicar.ps1 -SemCompilar` na máquina que guarda a chave.
+Como o certificado não vem de uma autoridade certificadora, o Windows só o reconhece nos computadores onde ele está gravado como confiável. A instalação e a atualização gravam o certificado em *Autoridades de Certificação Raiz Confiáveis* e *Editores Confiáveis*. Nesses computadores, o pedido de permissão do Windows mostra o nome da empresa. O primeiro download continua com o aviso do SmartScreen. O certificado só serve para assinar código e não pode emitir outros certificados. Mesmo assim, guarde o `.pfx` e a senha com o mesmo cuidado da chave da atualização.
+
+A chave **privada** da atualização automática nunca vai para o GitHub. Para montar a release, baixe os executáveis para a pasta de entrega e rode `scripts\9_publicar.ps1 -SemCompilar` na máquina que guarda a chave.
 
 ## Licença e créditos
 

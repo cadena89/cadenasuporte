@@ -49,6 +49,10 @@ if (-not (Test-Path "$Ferramentas\python\brotli.py")) {
   if ($LASTEXITCODE -ne 0) { throw 'import brotli' }
 }
 
+"=== Assinatura do programa (certificado da marca, se configurado)"
+. "$PSScriptRoot\assinar.ps1"
+Assinar-Arquivos @("$Release\rustdesk.exe", "$Release\librustdesk.dll")
+
 "=== Empacotando"
 Push-Location "$Fonte\libs\portable"
 & $py .\generate.py -f "$Release" -o . -e "$Release\rustdesk.exe"
@@ -57,6 +61,7 @@ Pop-Location
 if ($codigo -ne 0) { throw "generate.py saiu com $codigo" }
 $pacote = "$Fonte\target\release\rustdesk-portable-packer.exe"
 if (-not (Test-Path $pacote)) { throw 'empacotador nao gerou o exe' }
+Assinar-Arquivos $pacote
 # O nome terminado em install.exe faz o programa abrir a tela de instalacao
 # CADENA_PERFIL=tecnico vem do 8_compilar_perfis e define qual versao foi compilada
 $Nome = if ($env:CADENA_PERFIL -eq 'tecnico') { $Marca.NomeTecnico } else { $NomeApp }

@@ -1,5 +1,5 @@
-# Compila o Cliente e o Tecnico do Windows a partir deste repositorio e, se o
-# SignPath estiver configurado, envia os executaveis para assinatura de codigo.
+# Compila o Cliente e o Tecnico do Windows a partir deste repositorio e assina os executaveis com o
+# certificado da marca (scripts\gerar_certificado.ps1), quando os segredos estiverem definidos.
 #
 # Configuracao em Settings > Secrets and variables > Actions:
 #   Variaveis (aba Variables):
@@ -7,9 +7,11 @@
 #     CADENA_SERVIDOR2, CADENA_CHAVE2, CADENA_NOME2   segundo servidor (opcional)
 #     CADENA_API                                      endereco HTTPS da API
 #     CADENA_REPO_ATUALIZACAO, CADENA_CHAVE_ATUALIZACAO  releases e chave PUBLICA Ed25519 da atualizacao
-#     SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG, SIGNPATH_SIGNING_POLICY_SLUG  (depois de aprovado no SignPath)
-#   Segredo (aba Secrets):
-#     SIGNPATH_API_TOKEN
+#     CADENA_CERTIFICADO                              certificado PUBLICO (.cer em base64): o instalador o grava
+#                                                     como confiavel
+#   Segredos (aba Secrets), opcionais; sem eles os executaveis saem sem assinatura:
+#     CADENA_CERTIFICADO_PFX                          o .pfx (chave privada) em base64
+#     CADENA_CERTIFICADO_SENHA                        a senha do .pfx
 # A chave PRIVADA da atualizacao nunca vai para o GitHub: o versao.assinado e feito na maquina que publica
 # (scripts\9_publicar.ps1 -SemCompilar), com os executaveis ja assinados.
 name: Windows
@@ -48,6 +50,7 @@ jobs:
       CADENA_API: ${{ vars.CADENA_API }}
       CADENA_REPO_ATUALIZACAO: ${{ vars.CADENA_REPO_ATUALIZACAO }}
       CADENA_CHAVE_ATUALIZACAO: ${{ vars.CADENA_CHAVE_ATUALIZACAO }}
+      CADENA_CERTIFICADO: ${{ vars.CADENA_CERTIFICADO }}
       # Tag "v1.5.1-7" -> numero 7; execucao manual -> o numero informado
       CADENA_NUMERO: ${{ inputs.numero || '1' }}
       VCPKG_DEFAULT_BINARY_CACHE: C:\cb\vcpkg-cache
@@ -89,15 +92,18 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\2_marca.ps1
 
-      - name: Compilar Tecnico e Cliente
+      # Os segredos do certificado so existem neste passo (o 6_empacotar assina o programa e o instalador)
+      - name: Compilar e assinar Tecnico e Cliente
         shell: powershell
+        env:
+          CADENA_CERTIFICADO_PFX: ${{ secrets.CADENA_CERTIFICADO_PFX }}
+          CADENA_CERTIFICADO_SENHA: ${{ secrets.CADENA_CERTIFICADO_SENHA }}
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\8_compilar_perfis.ps1
 
-      - name: Enviar os executaveis (sem assinatura)
-        id: envio
+      - name: Enviar os executaveis
         uses: actions/upload-artifact@v6
         with:
-          name: windows-nao-assinado
+          name: windows
           path: C:/cb/entrega/*-install.exe
           if-no-files-found: error
 
@@ -106,25 +112,4 @@ jobs:
         with:
           name: fonte
           path: C:/cb/entrega/fonte/
-          if-no-files-found: error
-
-      # So depois que o projeto for aprovado no SignPath (https://signpath.org) e as variaveis forem definidas
-      - name: Assinar com o SignPath
-        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
-        uses: signpath/github-action-submit-signing-request@v1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          github-artifact-id: ${{ steps.envio.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: C:\cb\assinado
-
-      - name: Enviar os executaveis assinados
-        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: windows-assinado
-          path: C:/cb/assinado/
           if-no-files-found: error
