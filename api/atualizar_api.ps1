@@ -78,6 +78,14 @@ $PaginaInicial = [IO.File]::ReadAllText("$Painel\src\views\home\index.vue").Repl
 $PaginaInicial = [regex]::Replace($PaginaInicial, '(?s)\s*<NGrid[^>]*>\s*<NGi[^>]*>\s*<ChangeLogs />.*?</NGrid>', '')
 if ($PaginaInicial -match 'ChangeLogs|CreativityBanner') { throw 'a Home ainda tem o bloco de doacao' }
 [IO.File]::WriteAllText("$Painel\src\views\home\index.vue", $PaginaInicial, $utf8)
+# Home: cartao "Downloads" com os links da ultima versao publicada (releases/latest de RepoAtualizacao)
+if ($RepoAtualizacao) {
+  $Downloads = [IO.File]::ReadAllText("$PSScriptRoot\cadena-downloads.vue", [Text.Encoding]::UTF8).Replace("`r`n", "`n")
+  $Downloads = $Downloads.Replace('__REPO__', $RepoAtualizacao).Replace('__CLIENTE__', $Marca.NomeCliente).Replace('__TECNICO__', $Marca.NomeTecnico)
+  [IO.File]::WriteAllText("$Painel\src\views\home\modules\cadena-downloads.vue", $Downloads, $utf8)
+  Trocar 'src\views\home\index.vue' "import CardData from './modules/card-data.vue';" "import CardData from './modules/card-data.vue';`nimport CadenaDownloads from './modules/cadena-downloads.vue';"
+  Trocar 'src\views\home\index.vue' "    <CardData />`n" "    <CardData />`n    <CadenaDownloads />`n"
+}
 
 # Identidade da marca: icone (menu, favicon, Home), logo completo no login, cores e rodape
 Copy-Item -Force "$PastaMarca\icone.svg" "$Painel\src\assets\svg-icon\logo.svg"
