@@ -2,7 +2,7 @@
 // Cartao "Downloads" da Home: links da ultima versao publicada no GitHub (releases/latest), para o tecnico
 // copiar e mandar ao cliente sem digitar o endereco de uma versao antiga. Os valores __...__ sao trocados
 // pelo api\atualizar_api.ps1 (RepoAtualizacao, NomeCliente e NomeTecnico da marca).
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 
 defineOptions({ name: 'CadenaDownloads' });
 
@@ -23,6 +23,24 @@ const data = ref('');
 const arquivos = ref<Arquivo[]>([]);
 const carregando = ref(true);
 const erro = ref(false);
+// Recolhido por padrao (so o titulo e o atalho do Cliente); a escolha fica guardada neste navegador
+const CHAVE_ABERTO = 'cadena-downloads-aberto';
+function lerAberto() {
+  try {
+    return localStorage.getItem(CHAVE_ABERTO) === '1';
+  } catch {
+    return false;
+  }
+}
+const aberto = ref(lerAberto());
+function alternar() {
+  aberto.value = !aberto.value;
+  try {
+    localStorage.setItem(CHAVE_ABERTO, aberto.value ? '1' : '0');
+  } catch {}
+}
+const instaladorCliente = computed(() => arquivos.value.find(a => a.nome.startsWith(`${cliente}-`) && a.nome.endsWith('-install.exe'))
+);
 
 function rotulo(nome: string) {
   let quem = '';
@@ -83,7 +101,7 @@ onMounted(carregar);
 </script>
 
 <template>
-  <NCard :bordered="false" class="card-wrapper">
+  <NCard :bordered="false" class="card-wrapper" :content-style="aberto ? undefined : { display: 'none' }">
     <template #header>
       <span>Downloads</span>
       <span v-if="versao" class="pl-8px text-14px font-normal opacity-70">
@@ -91,8 +109,14 @@ onMounted(carregar);
       </span>
     </template>
     <template #header-extra>
-      <a :href="paginaVersoes" target="_blank" rel="noopener" class="text-14px text-primary">Página da versão</a>
+      <div class="flex flex-wrap items-center justify-end gap-8px">
+        <NButton v-if="instaladorCliente" size="small" type="primary" @click="copiar(instaladorCliente.url)">
+          Copiar link do instalador do Cliente
+        </NButton>
+        <NButton size="small" @click="alternar">{{ aberto ? 'Ocultar lista' : 'Todos os arquivos' }}</NButton>
+      </div>
     </template>
+    <template v-if="aberto">
     <NSpin v-if="carregando" size="small" />
     <div v-else-if="erro" class="text-14px">
       Não foi possível consultar o GitHub agora.
@@ -111,8 +135,10 @@ onMounted(carregar);
       <div class="pt-4px text-12px opacity-70">
         Para o cliente, mande o link do instalador do Cliente. Esta lista mostra sempre a última versão
         publicada: use estes links em vez de digitar o endereço de uma versão antiga.
+        <a :href="paginaVersoes" target="_blank" rel="noopener" class="text-primary">Página da versão</a>
       </div>
     </div>
+    </template>
   </NCard>
 </template>
 

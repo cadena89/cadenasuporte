@@ -84,7 +84,8 @@ if ($RepoAtualizacao) {
   $Downloads = $Downloads.Replace('__REPO__', $RepoAtualizacao).Replace('__CLIENTE__', $Marca.NomeCliente).Replace('__TECNICO__', $Marca.NomeTecnico)
   [IO.File]::WriteAllText("$Painel\src\views\home\modules\cadena-downloads.vue", $Downloads, $utf8)
   Trocar 'src\views\home\index.vue' "import CardData from './modules/card-data.vue';" "import CardData from './modules/card-data.vue';`nimport CadenaDownloads from './modules/cadena-downloads.vue';"
-  Trocar 'src\views\home\index.vue' "    <CardData />`n" "    <CardData />`n    <CadenaDownloads />`n"
+  # Depois dos graficos, para nao atrapalhar as metricas
+  Trocar 'src\views\home\index.vue' "    </NGrid>`n  </NSpace>" "    </NGrid>`n    <CadenaDownloads />`n  </NSpace>"
 }
 
 # Identidade da marca: icone (menu, favicon, Home), logo completo no login, cores e rodape
