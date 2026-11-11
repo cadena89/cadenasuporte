@@ -23,20 +23,26 @@ $Numero = [int](Get-Content -Raw $ArqNumero).Trim()
 $Fonte = Get-Content -Raw "$Raiz\rustdesk\src\updater.rs"
 if ($Fonte -notmatch "CADENA_NUMERO: u64 = $Numero;") { throw "O fonte nao esta com o numero $Numero. Rode o 2_marca e compile." }
 
-$Tag = "v$Versao-$Numero"
+# Tag e nomes seguem a versao publica (SemVer, configuracao.ps1); $Versao e a versao do RustDesk usada como base
+$Tag = "v$VersaoProduto"
 $Pasta = "$Entrega\publicar\$Tag"
 New-Item -ItemType Directory -Force $Pasta | Out-Null
-# A chave e o nome interno do app em minusculas: o atualizador de cada perfil procura a sua
+# A chave e o nome interno do app em minusculas: o atualizador de cada perfil procura a sua e baixa o arquivo
+# indicado aqui (o nome vem do versao.json assinado, nao de um padrao fixo no programa)
 $Arquivos = @{
-  ($Cliente.ToLower()) = "$Cliente-$Versao-install.exe"
-  ($Tecnico.ToLower()) = "$Tecnico-$Versao-install.exe"
+  ($Cliente.ToLower()) = (Nome-Arquivo 'client')
+  ($Tecnico.ToLower()) = (Nome-Arquivo 'tech')
 }
-foreach ($a in $Arquivos.Values + "$Cliente-$Versao-portatil.exe", "$Tecnico-$Versao-portatil.exe") {
+foreach ($a in @($Arquivos.Values) + (Nome-Arquivo 'client' 'portable'), (Nome-Arquivo 'tech' 'portable')) {
   Copy-Item -Force "$Entrega\$a" "$Pasta\$a"
 }
-# APKs do Android da mesma versao, para o download pelo celular (o Android nao se atualiza sozinho)
-Get-ChildItem "$Entrega\android\$Cliente-$Versao-*.apk" -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item -Force $_.FullName "$Pasta\$($_.Name)" }
-$Dados = [ordered]@{ numero = $Numero; tag = $Tag; versao = $Versao }
+# APKs do Android da mesma versao do RustDesk, para o download pelo celular (o Android nao se atualiza sozinho).
+# O script do Android gera <NomeCliente>-<versao>-<arm64|armv7>.apk; na release vao com o nome novo
+Get-ChildItem "$Entrega\android\$Cliente-$Versao-*.apk" -ErrorAction SilentlyContinue | ForEach-Object {
+  $arq = [regex]::Match($_.Name, '-(arm64|armv7)\.apk$').Groups[1].Value
+  if ($arq) { Copy-Item -Force $_.FullName "$Pasta\$(Nome-Arquivo 'client' $arq)" }
+}
+$Dados = [ordered]@{ numero = $Numero; tag = $Tag; versao = $VersaoProduto; rustdesk = $Versao }
 foreach ($p in $Cliente.ToLower(), $Tecnico.ToLower()) {
   $Dados[$p] = [ordered]@{
     arquivo = $Arquivos[$p]
@@ -59,7 +65,7 @@ if (-not $ok) { throw "A assinatura gerada nao confere" }
 
 "##### Pronto: $Pasta"
 Get-ChildItem $Pasta | Select-Object Name, Length | Format-Table -AutoSize | Out-String
-$Titulo = "$($Marca.ExibidoCliente) $Versao ($Numero)"
+$Titulo = "$($Marca.ExibidoCliente) $VersaoProduto"
 # Diz no titulo quando o servidor compilado e o 2 (0_nova_versao.ps1 -Reserva)
 $ConfigRs = Get-Content -Raw "$Raiz\rustdesk\libs\hbb_common\src\config.rs"
 $Primario = [regex]::Match($ConfigRs, 'RENDEZVOUS_SERVERS: &\[&str\] = &\["([^"]+)"\]').Groups[1].Value
@@ -68,7 +74,7 @@ if ($Publicar) {
   $Gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
   if (-not $Gh) { $Gh = "$Raiz\ferramentas\gh\bin\gh.exe" }
   $Arqs = Get-ChildItem $Pasta | ForEach-Object FullName
-  & $Gh release create $Tag @Arqs --repo $RepoAtualizacao --target main --title "$Titulo$Srv" --notes "$($Marca.ExibidoCliente) $Versao, numero $Numero$Srv." --latest
+  & $Gh release create $Tag @Arqs --repo $RepoAtualizacao --target main --title "$Titulo$Srv" --notes "$($Marca.ExibidoCliente) $VersaoProduto (numero $Numero, baseado no RustDesk $Versao)$Srv." --latest
   if ($LASTEXITCODE -ne 0) { throw "O gh nao publicou a release $Tag" }
   "##### Publicada: https://github.com/$RepoAtualizacao/releases/tag/$Tag"
   "As maquinas com numero menor que $Numero se atualizam em ate um dia, quando nao houver acesso em andamento."

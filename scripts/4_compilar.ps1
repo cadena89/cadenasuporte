@@ -19,6 +19,9 @@ if (-not (Test-Path 'src\bridge_generated.rs')) {
 }
 
 "=== build.py"
+# --dart-define=APP_TYPE (2_marca): tech no Tecnico e no Console, client no Cliente
+$env:CADENA_APP_TYPE = if ($env:CADENA_PERFIL -in 'tecnico', 'console') { 'tech' } else { 'client' }
+"APP_TYPE=$env:CADENA_APP_TYPE"
 & "$Ferramentas\python\python.exe" .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
 if ($LASTEXITCODE -ne 0) { throw "build.py saiu com $LASTEXITCODE" }
 if (-not (Test-Path 'flutter\build\windows\x64\runner\Release\rustdesk.exe')) { throw 'rustdesk.exe nao foi gerado' }

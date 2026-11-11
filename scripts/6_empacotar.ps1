@@ -62,13 +62,11 @@ if ($codigo -ne 0) { throw "generate.py saiu com $codigo" }
 $pacote = "$Fonte\target\release\rustdesk-portable-packer.exe"
 if (-not (Test-Path $pacote)) { throw 'empacotador nao gerou o exe' }
 Assinar-Arquivos $pacote
-# O nome terminado em install.exe faz o programa abrir a tela de instalacao
-# CADENA_PERFIL=tecnico vem do 8_compilar_perfis e define qual versao foi compilada
-$Nome = if ($env:CADENA_PERFIL -eq 'tecnico') { $Marca.NomeTecnico } else { $NomeApp }
-# CADENA_PERFIL=console vem do 7_compilar_console (Console Tecnico, nome proprio)
-if ($env:CADENA_PERFIL -eq 'console') { $Nome = if ($Marca.NomeConsole) { $Marca.NomeConsole } else { "Console$($Marca.NomeTecnico)" } }
-Copy-Item -Force $pacote "$Entrega\$Nome-$Versao-install.exe"
-Copy-Item -Force $pacote "$Entrega\$Nome-$Versao-portatil.exe"
+# suporte-v<versao>-<perfil>-x64.exe abre a tela de instalacao; ...-x64-portable.exe roda sem instalar (Nome-Arquivo,
+# configuracao.ps1). CADENA_PERFIL vem do 8_compilar_perfis (tecnico ou vazio) e do 7_compilar_console (console)
+$Perfil = switch ($env:CADENA_PERFIL) { 'tecnico' { 'tech' } 'console' { 'console' } default { 'client' } }
+Copy-Item -Force $pacote "$Entrega\$(Nome-Arquivo $Perfil)"
+Copy-Item -Force $pacote "$Entrega\$(Nome-Arquivo $Perfil 'portable')"
 
 "=== Fonte correspondente (AGPL-3.0)"
 Push-Location $Fonte

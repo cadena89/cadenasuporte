@@ -322,6 +322,20 @@ Trocar "$Fonte\flutter\lib\desktop\pages\desktop_setting_page.dart" @{
 Trocar "$Fonte\src\common.rs" @{
   'pub fn using_public_server\(\) -> bool \{\s*crate::get_custom_rendezvous_server\(get_option\("custom-rendezvous-server"\)\)\.is_empty\(\)' = 'pub fn using_public_server() -> bool { false'
 }
+# Nomes dos arquivos (configuracao.ps1, Nome-Arquivo): suporte-vX.Y.Z-<perfil>-x64.exe abre a tela de instalacao,
+# como o fim install.exe do RustDesk; o ...-x64-portable.exe continua portatil. O teste existe no programa e no
+# empacotador (que acrescenta o --install)
+Trocar "$Fonte\src\common.rs" @{
+  'name\.to_lowercase\(\)\.ends_with\("install\.exe"\)' = '{ let n = name.to_lowercase(); n.ends_with("install.exe") || n.ends_with("-x64.exe") }'
+}
+Trocar "$Fonte\libs\portable\src\main.rs" @{
+  'let click_setup = args\.is_empty\(\) && arg_exe\.to_lowercase\(\)\.ends_with\("install\.exe"\);' = 'let click_setup = args.is_empty() && { let n = arg_exe.to_lowercase(); n.ends_with("install.exe") || n.ends_with("-x64.exe") };'
+}
+# --dart-define=APP_TYPE no build do Flutter: tech no Tecnico e no Console, client no Cliente (o 4_compilar define
+# CADENA_APP_TYPE pelo CADENA_PERFIL). No Dart: kCadenaAppType (cadena_console.dart)
+Trocar "$Fonte\build.py" @{
+  "system2\('flutter build windows --release'\)" = "system2('flutter build windows --release --dart-define=APP_TYPE=' + os.environ.get('CADENA_APP_TYPE', 'client'))"
+}
 # O servidor vem embutido, entao o rodape nao deve sugerir contratar um servidor no site do RustDesk
 Trocar "$Fonte\flutter\lib\desktop\pages\connection_page.dart" @{
   'if \(!isIncomingOnly\) setupServerWidget\(\)' = 'if (!isIncomingOnly && !bind.isCustomClient()) setupServerWidget()'

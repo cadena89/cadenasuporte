@@ -106,6 +106,25 @@ if ($env:CADENA_NUMERO) {
   Set-Content -Encoding ascii $ArqNumero $env:CADENA_NUMERO
 }
 
+# Versao publica (SemVer, ex.: 1.0.0): vai no nome dos arquivos e na tag da release. O numero acima continua subindo
+# a cada entrega e e ele que decide a atualizacao automatica (as maquinas instaladas comparam o numero, nao o nome).
+# Vem de CADENA_VERSAO (CI) ou de <Entrega>\versao-produto.txt (0_nova_versao.ps1 -Versao)
+$ArqVersaoProduto = "$Entrega\versao-produto.txt"
+$VersaoProduto = Valor 'CADENA_VERSAO' ''
+if (-not $VersaoProduto -and (Test-Path $ArqVersaoProduto)) { $VersaoProduto = (Get-Content -Raw $ArqVersaoProduto).Trim() }
+if (-not $VersaoProduto) { $VersaoProduto = '1.0.0' }
+if ($VersaoProduto -notmatch '^\d+\.\d+\.\d+$') { throw "A versao precisa seguir o SemVer, ex.: 1.0.0 (veio: $VersaoProduto)" }
+# Nomes dos arquivos: suporte-v<versao>-<client|tech|console>-x64.exe instala (o 2_marca faz o programa tratar o fim
+# -x64.exe como instalador), ...-x64-portable.exe roda sem instalar e ...-<arm64|armv7>.apk e o Android
+function Nome-Arquivo([string]$Perfil, [string]$Tipo = 'install') {
+  $base = "suporte-v$VersaoProduto-$Perfil"
+  switch ($Tipo) {
+    'install' { return "$base-x64.exe" }
+    'portable' { return "$base-x64-portable.exe" }
+    default { return "$base-$Tipo.apk" }
+  }
+}
+
 # Versao do RustDesk usada (tag do GitHub)
 $TagRustDesk = Valor 'CADENA_TAG_RUSTDESK' $Cfg.TagRustDesk
 if (-not $TagRustDesk) { $TagRustDesk = '1.5.1' }

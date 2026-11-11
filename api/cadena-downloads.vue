@@ -39,10 +39,27 @@ function alternar() {
     localStorage.setItem(CHAVE_ABERTO, aberto.value ? '1' : '0');
   } catch {}
 }
-const instaladorCliente = computed(() => arquivos.value.find(a => a.nome.startsWith(`${cliente}-`) && a.nome.endsWith('-install.exe'))
+const instaladorCliente = computed(() => arquivos.value.find(
+    a =>
+      /^suporte-v[\d.]+-client-x64\.exe$/i.test(a.nome) ||
+      (a.nome.startsWith(`${cliente}-`) && a.nome.endsWith('-install.exe'))
+  )
 );
 
+// Nomes desde a v1.0.0: suporte-vX.Y.Z-<client|tech|console>-<x64|x64-portable|arm64|armv7>.<exe|apk>
+const PADRAO = /^suporte-v[\d.]+-(client|tech|console)-(x64|x64-portable|arm64|armv7)\.(exe|apk)$/i;
+const QUEM: Record<string, string> = { client: 'Cliente', tech: 'Técnico', console: 'Console Técnico' };
+
 function rotulo(nome: string) {
+  const novo = nome.match(PADRAO);
+  if (novo) {
+    const quem = QUEM[novo[1].toLowerCase()];
+    const tipo = novo[2].toLowerCase();
+    if (tipo === 'x64') return `${quem}: instalador (Windows)`;
+    if (tipo === 'x64-portable') return `${quem}: portátil, sem instalar (Windows)`;
+    return `${quem}: Android (${tipo === 'arm64' ? 'celulares atuais' : 'celulares antigos'})`;
+  }
+  // Nomes antigos (ate a v1.5.1-13 / v1.5.1-5): <NomeCliente|NomeTecnico>-<versao>-<install|portatil>.exe
   let quem = '';
   if (nome.startsWith(`${cliente}-`)) quem = 'Cliente';
   else if (nome.startsWith(`${tecnico}-`)) quem = 'Técnico';
@@ -55,6 +72,12 @@ function rotulo(nome: string) {
 }
 
 function ordem(nome: string) {
+  const novo = nome.match(PADRAO);
+  if (novo) {
+    const bases: Record<string, number> = { client: 0, tech: 10, console: 20 };
+    const base = bases[novo[1].toLowerCase()] ?? 30;
+    return base + ['x64', 'x64-portable', 'arm64', 'armv7'].indexOf(novo[2].toLowerCase());
+  }
   const base = nome.startsWith(`${cliente}-`) ? 0 : nome.startsWith(`${tecnico}-`) ? 10 : 20;
   if (nome.endsWith('-install.exe')) return base;
   if (nome.endsWith('-portatil.exe')) return base + 1;

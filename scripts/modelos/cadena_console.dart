@@ -29,6 +29,11 @@ const String kCadenaTrazer = 'cadena_trazer_para_console';
 /// Opcao local (Configuracoes > Geral): abrir os acessos em janela separada, como no Tecnico
 const String kCadenaOpcaoJanela = 'allow-cadena-console-janela';
 
+/// Tipo do aplicativo, de --dart-define=APP_TYPE no build do Flutter (4_compilar.ps1): 'tech' no Tecnico e no
+/// Console, 'client' no Cliente. O mesmo codigo serve aos dois; o comportamento do Rust segue o CADENA_PERFIL
+const String kCadenaAppType = String.fromEnvironment('APP_TYPE', defaultValue: 'client');
+bool get cadenaAppTecnico => kCadenaAppType == 'tech';
+
 bool? _console;
 
 /// Verdadeiro so no Console Tecnico

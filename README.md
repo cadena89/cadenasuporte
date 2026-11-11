@@ -97,6 +97,22 @@ powershell -ExecutionPolicy Bypass -File scripts\0_nova_versao.ps1 -SemAndroid
 
 Para o Android, rode uma vez `scripts\android\1_criar_wsl.ps1` e depois `0_nova_versao.ps1` sem `-SemAndroid`. Para publicar a release no GitHub (com o GitHub CLI logado), acrescente `-Publicar`.
 
+### Versões e nomes dos arquivos
+
+As releases seguem o [SemVer](https://semver.org/lang/pt-BR/). A tag é `vX.Y.Z` e os arquivos são:
+
+| Arquivo | O que é |
+|---|---|
+| `suporte-vX.Y.Z-client-x64.exe` | Cliente: instalador (abre a tela de instalação) |
+| `suporte-vX.Y.Z-client-x64-portable.exe` | Cliente portátil, sem instalar |
+| `suporte-vX.Y.Z-tech-x64.exe` | Técnico: instalador |
+| `suporte-vX.Y.Z-tech-x64-portable.exe` | Técnico portátil |
+| `suporte-vX.Y.Z-client-arm64.apk` / `-armv7.apk` | Cliente para Android |
+
+Use `0_nova_versao.ps1 -Versao 1.2.0` para escolher a versão. Sem `-Versao`, o script sobe o último número da anterior (1.0.0 → 1.0.1).
+
+Além da versão pública, existe um **número interno** (`<Entrega>\numero.txt`), que sobe a cada entrega e decide a atualização automática: os computadores instalados só atualizam para um número maior que o seu. O nome dos arquivos não importa para o atualizador, porque o `versao.json` assinado de cada release diz qual arquivo baixar. O Técnico e o Console são compilados com `--dart-define=APP_TYPE=tech`; o Cliente, com `APP_TYPE=client`.
+
 ### API
 
 ```powershell
@@ -115,7 +131,7 @@ Para trocar o SQLite pelo PostgreSQL, faça nesta ordem:
 
 ## Assinatura de código
 
-Os instaladores do Windows são compilados no GitHub Actions pelo workflow [`.github/workflows/windows.yml`](.github/workflows/windows.yml). Ele roda manualmente (Actions > Windows > Run workflow, informando o número da versão) ou a cada tag `v<versão>-<número>`, por exemplo `v1.5.1-2`.
+Os instaladores do Windows são compilados no GitHub Actions pelo workflow [`.github/workflows/windows.yml`](.github/workflows/windows.yml). Ele roda manualmente (Actions > Windows > Run workflow), informando a versão pública (por exemplo `1.0.0`) e o número interno. A tag `vX.Y.Z` é criada depois, junto com a release, a partir dos executáveis desse build.
 
 **Variáveis do workflow** (Settings > Secrets and variables > Actions > Variables):
 

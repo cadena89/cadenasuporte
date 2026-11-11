@@ -17,14 +17,17 @@
 name: Windows
 
 on:
+  # So manual: a tag vX.Y.Z e criada depois, junto com a release (gh release create), com os executaveis deste build
   workflow_dispatch:
     inputs:
+      versao:
+        description: 'Versao publica (SemVer, ex.: 1.0.0): nome dos arquivos e da tag'
+        required: true
+        default: '1.0.0'
       numero:
-        description: 'Numero da versao (atualizacao automatica: precisa ser maior que o instalado)'
+        description: 'Numero interno da versao (atualizacao automatica: precisa ser maior que o instalado)'
         required: true
         default: '1'
-  push:
-    tags: ['v*']
 
 permissions:
   contents: read
@@ -51,8 +54,8 @@ jobs:
       CADENA_REPO_ATUALIZACAO: ${{ vars.CADENA_REPO_ATUALIZACAO }}
       CADENA_CHAVE_ATUALIZACAO: ${{ vars.CADENA_CHAVE_ATUALIZACAO }}
       CADENA_CERTIFICADO: ${{ vars.CADENA_CERTIFICADO }}
-      # Tag "v1.5.1-7" -> numero 7; execucao manual -> o numero informado
-      CADENA_NUMERO: ${{ inputs.numero || '1' }}
+      CADENA_NUMERO: ${{ inputs.numero }}
+      CADENA_VERSAO: ${{ inputs.versao }}
       VCPKG_DEFAULT_BINARY_CACHE: C:\cb\vcpkg-cache
     steps:
       - uses: actions/checkout@v5
@@ -62,11 +65,8 @@ jobs:
         run: |
           $faltam = 'CADENA_SERVIDOR1', 'CADENA_CHAVE1', 'CADENA_REPO_ATUALIZACAO', 'CADENA_CHAVE_ATUALIZACAO' | Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
           if ($faltam) { throw "Defina em Settings > Secrets and variables > Actions > Variables: $($faltam -join ', ')" }
-          if ($env:GITHUB_REF -like 'refs/tags/v*') {
-            $n = ($env:GITHUB_REF_NAME -split '-')[-1]
-            if ($n -notmatch '^\d+$') { throw "A tag precisa terminar com o numero da versao, ex.: v1.5.1-7" }
-            "CADENA_NUMERO=$n" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          }
+          if ($env:CADENA_VERSAO -notmatch '^\d+\.\d+\.\d+$') { throw "versao precisa seguir o SemVer, ex.: 1.0.0" }
+          if ($env:CADENA_NUMERO -notmatch '^\d+$') { throw "numero precisa ser um numero inteiro" }
           git config --system core.longpaths true
           New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
 
@@ -104,7 +104,8 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: windows
-          path: C:/cb/entrega/*-install.exe
+          # Os instaladores (suporte-vX.Y.Z-client-x64.exe e -tech-x64.exe); o portatil e o mesmo exe com outro nome
+          path: C:/cb/entrega/suporte-v*-x64.exe
           if-no-files-found: error
 
       - name: Fonte correspondente (AGPL)
