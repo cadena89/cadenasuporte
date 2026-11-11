@@ -15,13 +15,17 @@ $NomeApp = $Marca.NomeCliente
 $NomeTecnico = $Marca.NomeTecnico
 $NomeExibido = $Marca.ExibidoCliente
 $NomeExibidoTecnico = $Marca.ExibidoTecnico
+# Console Tecnico (CADENA_PERFIL=console): o Tecnico com os acessos em abas na janela principal. Nome proprio, entao
+# instala e guarda configuracao ao lado do Tecnico, sem mexer nele
+$NomeConsole = if ($Marca.NomeConsole) { $Marca.NomeConsole } else { "Console$NomeTecnico" }
+$NomeExibidoConsole = if ($Marca.ExibidoConsole) { $Marca.ExibidoConsole } else { "Console $NomeExibidoTecnico" }
 $Empresa = $Marca.Empresa
 $Prefixo = $Marca.Prefixo
 $Descricao = "$NomeExibido - Acesso Remoto"
 $Direitos = "$Empresa. Baseado no RustDesk, (c) Purslane Tech Pte. Ltd., licenca AGPL-3.0."
 $Site = $Marca.Site.TrimEnd('/') + '/'
 $SiteCurto = ($Site -replace '^https?://', '').TrimEnd('/')
-foreach ($n in $NomeApp, $NomeTecnico, $Prefixo) {
+foreach ($n in $NomeApp, $NomeTecnico, $NomeConsole, $Prefixo) {
   if ($n -notmatch '^[A-Za-z0-9]+$') { throw "Nome interno e prefixo da marca so podem ter letras e numeros: $n" }
 }
 # Servidores (configuracao.ps1): o 1 vai como servidor do RustDesk; o 2 e opcional
@@ -354,7 +358,9 @@ $Perfis = @"
 // Perfis da marca embutidos no executavel, no lugar do custom.txt que so o RustDesk Server Pro assina.
 // Compilar com CADENA_PERFIL=tecnico gera a versao que so acessa; sem a variavel, a que so recebe acesso.
 fn cadena_perfil() -> serde_json::Value {
-    let tecnico = option_env!("CADENA_PERFIL") == Some("tecnico");
+    // CADENA_PERFIL=console: o Console Tecnico, igual ao Tecnico mas com nome proprio (acessos em abas)
+    let console = option_env!("CADENA_PERFIL") == Some("console");
+    let tecnico = console || option_env!("CADENA_PERFIL") == Some("tecnico");
     let mut travas = serde_json::json!({
         "hide-server-settings": "Y",
         "hide-network-settings": "Y",
@@ -379,7 +385,7 @@ fn cadena_perfil() -> serde_json::Value {
         travas["allow-numeric-one-time-password"] = "Y".into();
     }
     let mut perfil = serde_json::json!({
-        "app-name": if tecnico { "$NomeTecnico" } else { "$NomeApp" },
+        "app-name": if console { "$NomeConsole" } else if tecnico { "$NomeTecnico" } else { "$NomeApp" },
         "conn-type": if tecnico { "outgoing" } else { "incoming" },
         "default-settings": padrao,
         "override-settings": travas
@@ -477,7 +483,9 @@ pub fn cadena_chave_do_servidor(host: &str, chave: String) -> String {
 // Nome mostrado na tela, nos atalhos e em Programas instalados. O nome interno (sem espacos) fica nas pastas,
 // no servico e no .exe, porque o RustDesk o usa sem aspas em comandos como "sc stop" e "taskkill"
 pub fn cadena_nome_exibido() -> String {
-    if option_env!("CADENA_PERFIL") == Some("tecnico") {
+    if option_env!("CADENA_PERFIL") == Some("console") {
+        "$(Para-Rust $NomeExibidoConsole)".to_owned()
+    } else if option_env!("CADENA_PERFIL") == Some("tecnico") {
         "$(Para-Rust $NomeExibidoTecnico)".to_owned()
     } else {
         "$(Para-Rust $NomeExibido)".to_owned()
@@ -661,6 +669,16 @@ Trocar "$Fonte\flutter\lib\desktop\pages\desktop_home_page.dart" @{
 Trocar "$Fonte\flutter\lib\desktop\pages\desktop_home_page.dart" @{
   'buildPasswordBoard2\(BuildContext context, ServerModel model\) \{' = "buildPasswordBoard2(BuildContext context, ServerModel model) {`n    if (model.approveMode == 'click') return Container();"
 }
+# Cliente: liga o servico sozinho ao abrir, em vez de mostrar "Servico nao esta em execucao" e o link "Iniciar
+# servico" (cliente leigo nao sabe o que fazer). A opcao stop-service fica "Y" quando o servico foi removido ou a
+# instalacao dele falhou, e vale tambem para o portatil (a configuracao do usuario e a mesma).
+#  - portatil: so limpa a opcao, sem pedir nada;
+#  - instalado: reinstala o servico do Windows (pede a confirmacao de administrador uma vez e reabre o programa).
+# Tenta uma vez por abertura: se a pessoa recusar a confirmacao, o link continua la.
+Trocar "$Fonte\flutter\lib\desktop\pages\desktop_home_page.dart" @{
+  '  var svcStopped = false\.obs;' = "  var svcStopped = false.obs;`n  // CadenaTech: o Cliente liga o servico sozinho ao abrir (uma tentativa por abertura)`n  bool _cadenaServicoTentado = false;"
+  '      final v = await mainGetBoolOption\(kOptionStopService\);\r?\n      if \(v != svcStopped\.value\) \{\r?\n        svcStopped\.value = v;\r?\n        setState\(\(\) \{\}\);\r?\n      \}' = "      final v = await mainGetBoolOption(kOptionStopService);`n      if (v != svcStopped.value) {`n        svcStopped.value = v;`n        setState(() {});`n      }`n      if (v && !_cadenaServicoTentado && !bind.isOutgoingOnly()) {`n        _cadenaServicoTentado = true;`n        await start_service(true);`n      }"
+}
 # Atualizacao automatica (Windows instalado). A ultima release de github.com/$RepoAtualizacao traz versao.assinado:
 # base64 de assinatura Ed25519 + versao.json, assinado pelo 9_publicar.ps1 com a chave privada (ChavePrivada). O
 # servico confere a assinatura com a chave publica embutida, compara o numero com o desta compilacao (numero.txt
@@ -843,13 +861,14 @@ String cadenaNomeExibido() {
   final nome = bind.mainGetAppNameSync();
   if (nome == '__NOME_CLIENTE__') return '__EXIBIDO_CLIENTE__';
   if (nome == '__NOME_TECNICO__') return '__EXIBIDO_TECNICO__';
+  if (nome == '__NOME_CONSOLE__') return '__EXIBIDO_CONSOLE__';
   return nome;
 }
 
 String getWindowName({WindowType? overrideType}) {
   final name = cadenaNomeExibido();
 '@
-$NomeDart = $NomeDart.Replace('__NOME_CLIENTE__', $NomeApp).Replace('__NOME_TECNICO__', $NomeTecnico).Replace('__EXIBIDO_CLIENTE__', (Para-Dart $NomeExibido)).Replace('__EXIBIDO_TECNICO__', (Para-Dart $NomeExibidoTecnico))
+$NomeDart = $NomeDart.Replace('__NOME_CLIENTE__', $NomeApp).Replace('__NOME_TECNICO__', $NomeTecnico).Replace('__EXIBIDO_CLIENTE__', (Para-Dart $NomeExibido)).Replace('__EXIBIDO_TECNICO__', (Para-Dart $NomeExibidoTecnico)).Replace('__NOME_CONSOLE__', $NomeConsole).Replace('__EXIBIDO_CONSOLE__', (Para-Dart $NomeExibidoConsole))
 Trocar "$Fonte\flutter\lib\common.dart" @{
   'String getWindowName\(\{WindowType\? overrideType\}\) \{\r?\n  final name = bind\.mainGetAppNameSync\(\);' = ($NomeDart -replace "`r`n", "`n")
 }
@@ -868,7 +887,7 @@ Trocar "$Fonte\src\lib.rs" @{
 }
 # Tela do FTP no Tecnico (Configuracoes > Geral), sem mexer na ponte Flutter/Rust: usa mainGetCommon/mainSetCommon
 Trocar "$Fonte\src\flutter_ffi.rs" @{
-  'pub fn main_get_common\(key: String\) -> String \{' = "pub fn main_get_common(key: String) -> String {`n    // CadenaTech: servidores que respondem, mostrados ao lado do `"Pronto`"`n    if key == `"cadena-servidores`" {`n        return crate::common::cadena_servidores_conectados();`n    }`n    // CadenaTech: tela do envio das gravacoes por FTP`n    #[cfg(not(any(target_os = `"android`", target_os = `"ios`")))]`n    {`n        if key == `"cadena-ftp-estado`" {`n            return crate::cadena_ftp::estado_json();`n        }`n        if key == `"cadena-ftp-testar`" {`n            return crate::cadena_ftp::testar();`n        }`n    }"
+  'pub fn main_get_common\(key: String\) -> String \{' = "pub fn main_get_common(key: String) -> String {`n    // CadenaTech: Console Tecnico (CADENA_PERFIL=console) abre os acessos em abas na janela principal`n    if key == `"cadena-console`" {`n        return if option_env!(`"CADENA_PERFIL`") == Some(`"console`") { `"Y`" } else { `"`" }.to_owned();`n    }`n    // CadenaTech: servidores que respondem, mostrados ao lado do `"Pronto`"`n    if key == `"cadena-servidores`" {`n        return crate::common::cadena_servidores_conectados();`n    }`n    // CadenaTech: tela do envio das gravacoes por FTP`n    #[cfg(not(any(target_os = `"android`", target_os = `"ios`")))]`n    {`n        if key == `"cadena-ftp-estado`" {`n            return crate::cadena_ftp::estado_json();`n        }`n        if key == `"cadena-ftp-testar`" {`n            return crate::cadena_ftp::testar();`n        }`n    }"
   'pub fn main_set_common\(_key: String, _value: String\) \{' = "pub fn main_set_common(_key: String, _value: String) {`n    // CadenaTech: tela do envio das gravacoes por FTP`n    #[cfg(not(any(target_os = `"android`", target_os = `"ios`")))]`n    {`n        if _key == `"cadena-ftp-salvar`" {`n            crate::cadena_ftp::salvar_json(&_value);`n            return;`n        }`n        if _key == `"cadena-ftp-desligar`" {`n            crate::cadena_ftp::desligar();`n            return;`n        }`n    }"
 }
 Trocar "$Fonte\flutter\lib\desktop\pages\desktop_setting_page.dart" @{
@@ -892,6 +911,75 @@ Trocar "$Fonte\flutter\lib\common\widgets\peer_card.dart" @{
 }
 Trocar "$Fonte\flutter\lib\common\widgets\peers_view.dart" @{
   'width: 220, height: 140, child: visibilityChild\)' = "width: bind.isOutgoingOnly() ? 236 : 220,`n                              height: bind.isOutgoingOnly() ? 226 : 140,`n                              child: visibilityChild)"
+}
+
+# Console Tecnico (CADENA_PERFIL=console, prototipo aprovado em 2026-11-09): os acessos abrem em abas na janela
+# principal; menu do cartao e clique direito na aba levam para janela separada, e a janela separada devolve. Tudo
+# passa por cadenaConsole(), falso no Tecnico e no Cliente, entao eles continuam iguais
+Copy-Item -Force "$PSScriptRoot\modelos\cadena_console.dart" "$Fonte\flutter\lib\desktop\pages\cadena_console.dart"
+& git -C $Fonte add -N flutter/lib/desktop/pages/cadena_console.dart
+$ImpConsole = "import 'package:flutter_hbb/consts.dart';`nimport 'package:flutter_hbb/desktop/pages/cadena_console.dart';"
+Trocar "$Fonte\flutter\lib\common.dart" @{
+  "import '../consts.dart';" = "import '../consts.dart';`nimport 'package:flutter_hbb/desktop/pages/cadena_console.dart';"
+  '  \} else \{\r?\n    await rustDeskWinManager\.newRemoteDesktop\(id,' = "  } else {`n    // CadenaTech: no Console Tecnico o acesso abre numa aba da janela principal (cadena_console.dart)`n    if (cadenaAbrirNaAba(id,`n        password: password,`n        isSharedPassword: isSharedPassword,`n        forceRelay: forceRelay)) {`n      return;`n    }`n    await rustDeskWinManager.newRemoteDesktop(id,"
+}
+Trocar "$Fonte\flutter\lib\desktop\pages\desktop_tab_page.dart" @{
+  "import 'package:flutter_hbb/consts.dart';" = $ImpConsole
+  '            body: DesktopTab\(\r?\n              controller: tabController,' = "            body: DesktopTab(`n              controller: tabController,`n              // CadenaTech: Console Tecnico, nome e menu das abas de acesso (cadena_console.dart)`n              labelGetter: cadenaConsole() ? cadenaRotuloAba : null,`n              tabMenuBuilder: cadenaConsole()`n                  ? (key) => cadenaMenuDaAba(context, key)`n                  : null,"
+}
+Trocar "$Fonte\flutter\lib\desktop\pages\desktop_home_page.dart" @{
+  "import 'package:flutter_hbb/consts.dart';" = $ImpConsole
+  'rustDeskWinManager\.setMethodHandler\(\(call, fromWindowId\) async \{' = "rustDeskWinManager.setMethodHandler((call, fromWindowId) async {`n      // CadenaTech: Console Tecnico, acessos que vao e voltam das janelas separadas (cadena_console.dart)`n      if (cadenaChamadaDoConsole(call.method)) {`n        return await cadenaTratarChamada(call, fromWindowId);`n      }"
+}
+Trocar "$Fonte\flutter\lib\desktop\widgets\tabbar_widget.dart" @{
+  "import 'package:flutter_hbb/consts.dart';" = $ImpConsole
+  '  void onWindowClose\(\) async \{' = "  void onWindowClose() async {`n    // CadenaTech: Console Tecnico, confirma antes de fechar a janela principal com acessos em abas`n    if (tabType == DesktopTabType.main &&`n        !await cadenaPodeFecharConsole(controller)) {`n      return;`n    }"
+}
+$Trazer = @'
+    // CadenaTech: Console Tecnico, devolve o acesso para uma aba da janela principal (cadena_console.dart)
+    final cadenaTrazer =
+        cadenaItemTrazer(windowId(), key, '$sessionId', cancelFunc);
+    if (cadenaTrazer != null) menu.insert(1, cadenaTrazer);
+    if (perms['restart'] != false &&
+'@
+Trocar "$Fonte\flutter\lib\desktop\pages\remote_tab_page.dart" @{
+  "import 'package:flutter_hbb/consts.dart';" = $ImpConsole
+  "    if \(perms\['restart'\] != false &&" = ($Trazer -replace "`r`n", "`n")
+}
+$NovaJanela = @'
+  // CadenaTech: Console Tecnico, abre este acesso numa janela separada mesmo com as abas ligadas
+  MenuEntryBase<String> _cadenaNovaJanelaAction(BuildContext context) {
+    return MenuEntryButton<String>(
+      childBuilder: (TextStyle? style) =>
+          Text('Abrir em nova janela', style: style),
+      proc: () {
+        cadenaForcarJanela = true;
+        connectInPeerTab(context, peer, tab);
+      },
+      padding: menuPadding,
+      dismissOnClicked: true,
+    );
+  }
+
+  @protected
+  MenuEntryBase<String> _connectAction(BuildContext context) {
+'@
+Trocar "$Fonte\flutter\lib\common\widgets\peer_card.dart" @{
+  "import 'package:flutter_hbb/consts.dart';" = $ImpConsole
+  '  @protected\r?\n  MenuEntryBase<String> _connectAction\(BuildContext context\) \{' = ($NovaJanela -replace "`r`n", "`n")
+  '    final List<MenuEntryBase<String>> menuItems = \[\r?\n      _connectAction\(context\),' = "    final List<MenuEntryBase<String>> menuItems = [`n      _connectAction(context),`n      if (cadenaConsole()) _cadenaNovaJanelaAction(context),"
+}
+Trocar "$Fonte\flutter\lib\desktop\pages\desktop_setting_page.dart" @{
+  "import 'package:flutter_hbb/consts.dart';" = $ImpConsole
+  "          'Open connection in new tab',\r?\n          kOptionOpenNewConnInTabs,\r?\n          isServer: false,\r?\n        \)," = "          'Open connection in new tab',`n          kOptionOpenNewConnInTabs,`n          isServer: false,`n        ),`n        // CadenaTech: Console Tecnico, padrao de onde abrir os acessos (cadena_console.dart)`n        if (cadenaConsole())`n          _OptionCheckBox(`n            context,`n            'Abrir os acessos em janela separada (fora do console)',`n            kCadenaOpcaoJanela,`n            isServer: false,`n          ),"
+}
+# Na janela principal o stateGlobal.windowId e -1; o acesso em aba usa o id 0 (o da principal) para tela cheia,
+# minimizar e o tamanho da janela. Nas janelas de acesso o id e sempre >= 1, entao nada muda nelas
+Trocar "$Fonte\flutter\lib\models\state_model.dart" @{
+  'final wc = WindowController\.fromWindowId\(windowId\);' = "// CadenaTech: Console Tecnico, acesso em aba na janela principal (id -1 = principal, que e a 0)`n      final wc = WindowController.fromWindowId(windowId < 0 ? kWindowMainId : windowId);"
+}
+Trocar "$Fonte\flutter\lib\desktop\widgets\remote_toolbar.dart" @{
+  '  int get windowId => stateGlobal\.windowId;' = "  // CadenaTech: Console Tecnico, acesso em aba na janela principal (id -1 = principal, que e a 0)`n  int get windowId =>`n      stateGlobal.windowId < 0 ? kWindowMainId : stateGlobal.windowId;"
 }
 Trocar "$Fonte\flutter\lib\common\widgets\peer_tab_page.dart" @{
   'class PeerTabPage extends StatefulWidget \{' = "// CadenaTech: a lateral do Tecnico (cadena_inicio.dart) troca de aba e recarrega por aqui`nFuture<void> Function(int)? cadenaTrocarAba;`nvoid Function()? cadenaRecarregarAba;`n`nclass PeerTabPage extends StatefulWidget {"

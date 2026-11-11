@@ -65,6 +65,8 @@ Assinar-Arquivos $pacote
 # O nome terminado em install.exe faz o programa abrir a tela de instalacao
 # CADENA_PERFIL=tecnico vem do 8_compilar_perfis e define qual versao foi compilada
 $Nome = if ($env:CADENA_PERFIL -eq 'tecnico') { $Marca.NomeTecnico } else { $NomeApp }
+# CADENA_PERFIL=console vem do 7_compilar_console (Console Tecnico, nome proprio)
+if ($env:CADENA_PERFIL -eq 'console') { $Nome = if ($Marca.NomeConsole) { $Marca.NomeConsole } else { "Console$($Marca.NomeTecnico)" } }
 Copy-Item -Force $pacote "$Entrega\$Nome-$Versao-install.exe"
 Copy-Item -Force $pacote "$Entrega\$Nome-$Versao-portatil.exe"
 
