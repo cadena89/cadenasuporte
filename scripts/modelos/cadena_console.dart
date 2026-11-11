@@ -65,6 +65,11 @@ bool _preparado = false;
 void _prepararControle(DesktopTabController c) {
   if (_preparado) return;
   _preparado = true;
+  // Como o DesktopRemoteScreen faz nas janelas de acesso: liga a captura do teclado do Windows (rdev). Sem isso, na
+  // janela principal as teclas iam pelo Flutter, que descarta tudo no modo padrao ("Input source 1"), e as
+  // combinacoes (Ctrl+A, Ctrl+C, Alt+Tab...) nao chegavam ao computador remoto; na janela separada funcionavam
+  bind.mainInitInputSource();
+  stateGlobal.getInputSource(force: true);
   final antesSelecao = c.onSelected;
   final antesRemocao = c.onRemoved;
   c.onSelected = (key) {
