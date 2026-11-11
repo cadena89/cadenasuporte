@@ -6,7 +6,7 @@
 
 Acesso remoto para equipes de suporte, baseado no [RustDesk](https://github.com/rustdesk/rustdesk), com servidor próprio, marca configurável e um painel de gestão em português. Projeto 100% open source, sob a licença **AGPL-3.0**.
 
-O repositório **não traz uma cópia do RustDesk**. Os scripts baixam o código original numa versão fixa (tag `1.5.1`), aplicam as modificações e a marca e compilam. Assim cada mudança fica legível e é fácil acompanhar versões novas do RustDesk.
+O repositório **não traz uma cópia do RustDesk**. Os scripts baixam o código original numa versão fixa (tag `1.5.3`, em `TagRustDesk`), aplicam as modificações e a marca e compilam. Assim cada mudança fica legível e é fácil acompanhar versões novas do RustDesk.
 
 ## O que vem pronto
 

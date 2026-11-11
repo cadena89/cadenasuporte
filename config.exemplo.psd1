@@ -8,7 +8,7 @@
   # Ferramentas (Rust, Flutter, vcpkg...) e codigo do RustDesk ficam aqui; os instaladores gerados, em Entrega
   Raiz      = 'D:\rustdesk-build'
   Entrega   = 'D:\rustdesk-build\entrega'
-  TagRustDesk = '1.5.1'
+  TagRustDesk = '1.5.3'
   # Distribuicao do WSL usada para compilar o Android
   DistroWsl = 'CadenaBuild'
 

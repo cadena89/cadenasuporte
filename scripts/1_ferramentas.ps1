@@ -60,6 +60,20 @@ if (-not (Test-Path "$Raiz\rustdesk\.git")) {
   & git -c advice.detachedHead=false clone --quiet --depth 1 --branch $TagRustDesk --recurse-submodules --shallow-submodules https://github.com/rustdesk/rustdesk.git "$Raiz\rustdesk"
   if ($LASTEXITCODE -ne 0) { throw "clone do RustDesk $TagRustDesk" }
 }
+# Versao nova do RustDesk (TagRustDesk mudou): troca o codigo ja baixado para a tag nova. As modificacoes locais sao
+# descartadas; o 2_marca as aplica de novo. Os arquivos que o build gerou ficam (o proximo build e incremental)
+$atual = & git -C "$Raiz\rustdesk" describe --tags --exact-match 2>$null
+if ($atual -ne $TagRustDesk) {
+  "Trocando o codigo do RustDesk de '$atual' para $TagRustDesk"
+  & git -C "$Raiz\rustdesk\libs\hbb_common" checkout --quiet -- .
+  & git -C "$Raiz\rustdesk" checkout --quiet -- .
+  & git -C "$Raiz\rustdesk" fetch --quiet --depth 1 origin tag $TagRustDesk
+  if ($LASTEXITCODE -ne 0) { throw "fetch da tag $TagRustDesk" }
+  & git -C "$Raiz\rustdesk" -c advice.detachedHead=false checkout --quiet $TagRustDesk
+  if ($LASTEXITCODE -ne 0) { throw "checkout da tag $TagRustDesk" }
+  & git -C "$Raiz\rustdesk" submodule update --init --depth 1 --quiet
+  if ($LASTEXITCODE -ne 0) { throw "submodulos da tag $TagRustDesk" }
+}
 & git -C "$Raiz\rustdesk" log -1 --format="%h %s"
 
 "=== Motor e correcao do Flutter usados pelo RustDesk"

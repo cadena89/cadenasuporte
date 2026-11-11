@@ -127,4 +127,4 @@ function Nome-Arquivo([string]$Perfil, [string]$Tipo = 'install') {
 
 # Versao do RustDesk usada (tag do GitHub)
 $TagRustDesk = Valor 'CADENA_TAG_RUSTDESK' $Cfg.TagRustDesk
-if (-not $TagRustDesk) { $TagRustDesk = '1.5.1' }
+if (-not $TagRustDesk) { $TagRustDesk = '1.5.3' }

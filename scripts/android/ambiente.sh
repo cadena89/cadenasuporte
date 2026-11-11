@@ -20,7 +20,7 @@ export LANG=C.UTF-8
 export PATH=$CARGO_HOME/bin:$VB/flutter/bin:$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_NDK_HOME:$PATH
 # Vem do 0_nova_versao.ps1 (config.local.psd1 e marca). Para trocar a versao do RustDesk: TagRustDesk no config
 # e depois trocar_base.sh
-export TAG_RUSTDESK="${TAG_RUSTDESK:-1.5.1}"
+export TAG_RUSTDESK="${TAG_RUSTDESK:-1.5.3}"
 : "${ENTREGA:?Defina ENTREGA (pasta de entrega, ex.: /mnt/d/rustdesk-build/entrega)}"
 # A compilacao roda em prioridade baixa
 renice -n 10 $$ >/dev/null 2>&1 || true
