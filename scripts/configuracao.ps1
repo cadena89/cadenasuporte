@@ -116,14 +116,17 @@ if (-not $VersaoProduto) { $VersaoProduto = '1.0.0' }
 if ($VersaoProduto -notmatch '^\d+\.\d+\.\d+$') { throw "A versao precisa seguir o SemVer, ex.: 1.0.0 (veio: $VersaoProduto)" }
 # Nomes dos arquivos: suporte-v<versao>-<client|tech|console>-x64.exe instala (o 2_marca faz o programa tratar o fim
 # -x64.exe como instalador), ...-x64-portable.exe roda sem instalar e ...-<arm64|armv7>.apk e o Android
-function Nome-Arquivo([string]$Perfil, [string]$Tipo = 'install') {
+# (o Cliente tambem sai em x86, 32 bits: ...-client-x86.exe e ...-client-x86-portable.exe)
+function Nome-Arquivo([string]$Perfil, [string]$Tipo = 'install', [string]$Arq = 'x64') {
   $base = "suporte-v$VersaoProduto-$Perfil"
   switch ($Tipo) {
-    'install' { return "$base-x64.exe" }
-    'portable' { return "$base-x64-portable.exe" }
+    'install' { return "$base-$Arq.exe" }
+    'portable' { return "$base-$Arq-portable.exe" }
     default { return "$base-$Tipo.apk" }
   }
 }
+# Nome interno do Console Tecnico (o mesmo que o 2_marca usa): chave dele no versao.json
+$NomeConsole = if ($Marca.NomeConsole) { $Marca.NomeConsole } else { "Console$($Marca.NomeTecnico)" }
 
 # Versao do RustDesk usada (tag do GitHub)
 $TagRustDesk = Valor 'CADENA_TAG_RUSTDESK' $Cfg.TagRustDesk

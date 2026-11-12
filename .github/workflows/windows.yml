@@ -93,7 +93,7 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\2_marca.ps1
 
       # Os segredos do certificado so existem neste passo (o 6_empacotar assina o programa e o instalador)
-      - name: Compilar e assinar Tecnico e Cliente
+      - name: Compilar e assinar Console Tecnico e Cliente
         shell: powershell
         env:
           CADENA_CERTIFICADO_PFX: ${{ secrets.CADENA_CERTIFICADO_PFX }}
@@ -104,7 +104,8 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: windows
-          # Os instaladores (suporte-vX.Y.Z-client-x64.exe e -tech-x64.exe); o portatil e o mesmo exe com outro nome
+          # Os instaladores (suporte-vX.Y.Z-client-x64.exe e -console-x64.exe); o portatil e o mesmo exe com outro
+          # nome. O Cliente x86 (Sciter) e compilado fora do CI, pelo x86_compilar.ps1
           path: C:/cb/entrega/suporte-v*-x64.exe
           if-no-files-found: error
 

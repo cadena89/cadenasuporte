@@ -9,7 +9,8 @@ $OpenSsl = 'C:\Program Files\Git\usr\bin\openssl.exe'
 if (-not $ChavePrivada -or -not (Test-Path $ChavePrivada)) { throw "Chave privada de assinatura ausente: $ChavePrivada (ChavePrivada no config.local.psd1)" }
 if (-not $RepoAtualizacao) { throw 'Informe RepoAtualizacao no config.local.psd1' }
 $Cliente = $Marca.NomeCliente
-$Tecnico = $Marca.NomeTecnico
+# A release leva o Cliente (x64 e x86) e o Console Tecnico, mais os APKs. O Tecnico avulso saiu em 2026-11-12: quem
+# o tem instalado instala o Console uma vez, e o Console se atualiza sozinho daqui em diante
 
 if (-not $SemCompilar) {
   $novo = [int](Get-Content -Raw $ArqNumero).Trim() + 1
@@ -29,11 +30,19 @@ $Pasta = "$Entrega\publicar\$Tag"
 New-Item -ItemType Directory -Force $Pasta | Out-Null
 # A chave e o nome interno do app em minusculas: o atualizador de cada perfil procura a sua e baixa o arquivo
 # indicado aqui (o nome vem do versao.json assinado, nao de um padrao fixo no programa)
-$Arquivos = @{
+$Arquivos = [ordered]@{
   ($Cliente.ToLower()) = (Nome-Arquivo 'client')
-  ($Tecnico.ToLower()) = (Nome-Arquivo 'tech')
+  ($NomeConsole.ToLower()) = (Nome-Arquivo 'console')
 }
-foreach ($a in @($Arquivos.Values) + (Nome-Arquivo 'client' 'portable'), (Nome-Arquivo 'tech' 'portable')) {
+$Portateis = @((Nome-Arquivo 'client' 'portable'), (Nome-Arquivo 'console' 'portable'))
+# Cliente x86 (x86_compilar.ps1), quando compilado: o atualizador da versao de 32 bits procura a chave <nome>-x86
+if (Test-Path "$Entrega\$(Nome-Arquivo 'client' 'install' 'x86')") {
+  $Arquivos["$($Cliente.ToLower())-x86"] = (Nome-Arquivo 'client' 'install' 'x86')
+  $Portateis += (Nome-Arquivo 'client' 'portable' 'x86')
+} else {
+  Write-Warning "Sem o Cliente x86 ($(Nome-Arquivo 'client' 'install' 'x86')): a release sai so com o x64"
+}
+foreach ($a in @($Arquivos.Values) + $Portateis) {
   Copy-Item -Force "$Entrega\$a" "$Pasta\$a"
 }
 # APKs do Android da mesma versao do RustDesk, para o download pelo celular (o Android nao se atualiza sozinho).
@@ -43,7 +52,7 @@ Get-ChildItem "$Entrega\android\$Cliente-$Versao-*.apk" -ErrorAction SilentlyCon
   if ($arq) { Copy-Item -Force $_.FullName "$Pasta\$(Nome-Arquivo 'client' $arq)" }
 }
 $Dados = [ordered]@{ numero = $Numero; tag = $Tag; versao = $VersaoProduto; rustdesk = $Versao }
-foreach ($p in $Cliente.ToLower(), $Tecnico.ToLower()) {
+foreach ($p in @($Arquivos.Keys)) {
   $Dados[$p] = [ordered]@{
     arquivo = $Arquivos[$p]
     sha256  = (Get-FileHash -Algorithm SHA256 "$Pasta\$($Arquivos[$p])").Hash.ToLower()

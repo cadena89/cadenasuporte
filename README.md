@@ -103,11 +103,15 @@ As releases seguem o [SemVer](https://semver.org/lang/pt-BR/). A tag é `vX.Y.Z`
 
 | Arquivo | O que é |
 |---|---|
-| `suporte-vX.Y.Z-client-x64.exe` | Cliente: instalador (abre a tela de instalação) |
-| `suporte-vX.Y.Z-client-x64-portable.exe` | Cliente portátil, sem instalar |
-| `suporte-vX.Y.Z-tech-x64.exe` | Técnico: instalador |
-| `suporte-vX.Y.Z-tech-x64-portable.exe` | Técnico portátil |
+| `suporte-vX.Y.Z-client-x64.exe` | Cliente para Windows 64 bits: instalador (abre a tela de instalação) |
+| `suporte-vX.Y.Z-client-x64-portable.exe` | Cliente 64 bits portátil, sem instalar |
+| `suporte-vX.Y.Z-client-x86.exe` | Cliente para Windows 32 bits (também roda no de 64): instalador |
+| `suporte-vX.Y.Z-client-x86-portable.exe` | Cliente 32 bits portátil |
+| `suporte-vX.Y.Z-console-x64.exe` | Console Técnico (quem atende, acessos em abas): instalador |
+| `suporte-vX.Y.Z-console-x64-portable.exe` | Console Técnico portátil |
 | `suporte-vX.Y.Z-client-arm64.apk` / `-armv7.apk` | Cliente para Android |
+
+O `8_compilar_perfis.ps1` compila o Console e o Cliente x64. O **Cliente x86** sai do `x86_compilar.ps1` (rode o `x86_ferramentas.ps1` uma vez antes). Ele usa a **interface antiga do RustDesk (Sciter)**, porque o RustDesk não tem Flutter de 32 bits. O `2_marca.ps1` leva para ela o essencial: o aviso na janela de aceitar, a aprovação por clique sem senha na tela, o texto do ID e o serviço ligado sozinho ao abrir. Cada versão tem a sua entrada no `versao.json` (o x86 procura `<nome>-x86`), então a atualização automática não troca uma pela outra. O Técnico avulso ainda compila (`CADENA_PERFIL=tecnico`), mas não vai para a release.
 
 Use `0_nova_versao.ps1 -Versao 1.2.0` para escolher a versão. Sem `-Versao`, o script sobe o último número da anterior (1.0.0 → 1.0.1).
 

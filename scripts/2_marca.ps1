@@ -43,6 +43,15 @@ function Argb([string]$cor) {
 # Texto da marca dentro de codigo: aspas simples do Dart e aspas duplas do Rust
 function Para-Dart([string]$s) { return $s.Replace('\', '\\').Replace("'", "\'").Replace('$', '\$') }
 function Para-Rust([string]$s) { return $s.Replace('\', '\\').Replace('"', '\"') }
+# Texto para string da interface antiga (Sciter): o Sciter le o HTML embutido como Latin1, entao os acentos vao
+# como \uXXXX (so ASCII no arquivo) e chegam certos na tela
+function Para-Tis([string]$s) {
+  $sb = New-Object Text.StringBuilder
+  foreach ($c in (Para-Rust $s).ToCharArray()) {
+    if ([int]$c -lt 128) { [void]$sb.Append($c) } else { [void]$sb.Append(('\u{0:x4}' -f [int]$c)) }
+  }
+  return $sb.ToString()
+}
 
 # Comeca sempre do codigo original da tag: assim a troca de servidor (ou de qualquer texto) nao esbarra
 # no que a execucao anterior ja trocou. Os arquivos gerados fora do git (ponte Flutter/Rust) ficam
@@ -326,10 +335,10 @@ Trocar "$Fonte\src\common.rs" @{
 # como o fim install.exe do RustDesk; o ...-x64-portable.exe continua portatil. O teste existe no programa e no
 # empacotador (que acrescenta o --install)
 Trocar "$Fonte\src\common.rs" @{
-  'name\.to_lowercase\(\)\.ends_with\("install\.exe"\)' = '{ let n = name.to_lowercase(); n.ends_with("install.exe") || n.ends_with("-x64.exe") }'
+  'name\.to_lowercase\(\)\.ends_with\("install\.exe"\)' = '{ let n = name.to_lowercase(); n.ends_with("install.exe") || n.ends_with("-x64.exe") || n.ends_with("-x86.exe") }'
 }
 Trocar "$Fonte\libs\portable\src\main.rs" @{
-  'let click_setup = args\.is_empty\(\) && arg_exe\.to_lowercase\(\)\.ends_with\("install\.exe"\);' = 'let click_setup = args.is_empty() && { let n = arg_exe.to_lowercase(); n.ends_with("install.exe") || n.ends_with("-x64.exe") };'
+  'let click_setup = args\.is_empty\(\) && arg_exe\.to_lowercase\(\)\.ends_with\("install\.exe"\);' = 'let click_setup = args.is_empty() && { let n = arg_exe.to_lowercase(); n.ends_with("install.exe") || n.ends_with("-x64.exe") || n.ends_with("-x86.exe") };'
 }
 # --dart-define=APP_TYPE no build do Flutter: tech no Tecnico e no Console, client no Cliente (o 4_compilar define
 # CADENA_APP_TYPE pelo CADENA_PERFIL). No Dart: kCadenaAppType (cadena_console.dart)
@@ -744,7 +753,11 @@ fn cadena_atualizar() -> ResultType<()> {
     }
     // A chave e o nome interno do app em minusculas (ex.: cadenasuporte / cadenatecnico). Versoes antigas, com
     // outro nome (cliente / tecnico), nao acham a sua chave e ficam como estao, sem instalar um segundo programa
-    let perfil = crate::get_app_name().to_lowercase();
+    let mut perfil = crate::get_app_name().to_lowercase();
+    // O Cliente de 32 bits (x86) tem a sua entrada (<nome>-x86), para nao baixar o instalador de 64 bits
+    if cfg!(target_arch = "x86") {
+        perfil.push_str("-x86");
+    }
     let perfil = perfil.as_str();
     let (Some(tag), Some(arquivo), Some(sha256)) = (
         dados["tag"].as_str(),
@@ -1051,5 +1064,49 @@ Trocar "$Fonte\src\client.rs" @{
   'match Self::_start\(peer, key, token, conn_type, interface\.clone\(\)\)\.await \{' = "let mut resultado = Self::_start(peer, key, token, conn_type, interface.clone()).await;`n        // CadenaTech: o servidor 1 nao achou o ID ou nao respondeu; tenta o mesmo ID no servidor 2, com a chave dele`n        if resultado.is_err()`n            && !crate::common::CADENA_SERVIDOR2.is_empty()`n            && !peer.contains('@')`n            && interface.get_lch().read().unwrap().other_server.is_none()`n        {`n            log::info!(`"CadenaTech: tentando {} pelo servidor 2 ({})`", peer, crate::common::CADENA_SERVIDOR2);`n            crate::common::CADENA_TENTATIVA2.lock().unwrap().insert(`n                peer.to_owned(),`n                (`n                    peer.to_owned(),`n                    crate::common::CADENA_SERVIDOR2.to_owned(),`n                    crate::common::CADENA_CHAVE2.to_owned(),`n                ),`n            );`n            let segunda = Self::_start(peer, key, token, conn_type, interface.clone()).await;`n            crate::common::CADENA_TENTATIVA2.lock().unwrap().remove(peer);`n            if segunda.is_ok() {`n                resultado = segunda;`n            }`n        }`n        match resultado {"
   'let other_server = interface\.get_lch\(\)\.read\(\)\.unwrap\(\)\.other_server\.clone\(\);' = "let other_server = interface`n            .get_lch()`n            .read()`n            .unwrap()`n            .other_server`n            .clone()`n            .or_else(|| crate::common::CADENA_TENTATIVA2.lock().unwrap().get(peer).cloned());"
   'let mut conn = connect_tcp\(host\.clone\(\), CONNECT_TIMEOUT\)\.await\?;\r?\n    let key = crate::get_key\(true\)\.await;' = "let mut conn = connect_tcp(host.clone(), CONNECT_TIMEOUT).await?;`n    let key = crate::common::cadena_chave_do_servidor(&host, crate::get_key(true).await);"
+}
+# Interface antiga (Sciter), usada so pelo Cliente de 32 bits (x86_compilar.ps1): o essencial das telas do Flutter
+#  - janela de aceitar: o aviso da marca (AvisoJanela) acima dos botoes;
+#  - tela inicial: o texto do ID da marca (TextoId) e sem a senha no modo de aprovacao por clique;
+#  - servico ligado sozinho ao abrir, como no Flutter (uma tentativa por abertura)
+$CorAvisoTis = "#$((Hex $Marca.CorEscura).ToLower())"
+Trocar "$Fonte\src\ui\cm.tis" @{
+  '                <div style="size:\*"/>\r?\n                <div \.outer_buttons>' = "                <div style=`"size:*`"/>`n                {!auth && !disconnected && show_accept_btn && !c.is_file_transfer && !c.is_terminal && !c.port_forward ? <div style=`"background:$CorAvisoTis; color:white; padding:8px; margin-bottom:6px; border-radius:6px; font-size:0.9em;`">{`"$(Para-Tis $Marca.AvisoJanela)`"}</div> : `"`"}`n                <div .outer_buttons>"
+}
+Trocar "$Fonte\src\ui\index.tis" @{
+  "\{outgoing_only \? translate\('outgoing_only_desk_tip'\) : translate\('desk_tip'\)\}" = "{outgoing_only ? translate('outgoing_only_desk_tip') : `"$(Para-Tis $Marca.TextoId)`"}"
+  # Janela do Cliente (so recebe acesso): 180 px de largura deixava tudo espremido; 340 px e o visual da marca
+  'const incoming_only_width = 180;' = 'const incoming_only_width = 340;'
+  '\(handler\.is_installed\(\) \|\| disable_installation\) \? 300 : 390\)' = '(handler.is_installed() || disable_installation) ? 400 : 560)'
+  'scaleIt\(incoming_only \? 390 : 600\)' = 'scaleIt(incoming_only ? ((handler.is_installed() || disable_installation) ? 420 : 600) : 600)'
+  '            <div \.app>' = '            <div class={incoming_only ? "app cadena" : "app"}>'
+  '\{!outgoing_only && <PasswordArea />\}' = "{!outgoing_only && handler.get_option('approve-mode') != 'click' && <PasswordArea />}"
+  'function self\.ready\(\) \{' = "function self.ready() {`n    // CadenaTech: o Cliente liga o servico sozinho ao abrir (uma tentativa por abertura), como no Flutter`n    if (service_stopped && !outgoing_only) self.timer(2s, function() { handler.set_option(`"stop-service`", `"`"); });"
+  # Titulo "Seu Computador": na janela estreita do Cliente ele quebra em duas linhas, e a altura fixa de uma linha
+  # o fazia cobrir o texto de baixo
+  '<div \.title style="flow:horizontal; position:relative; height:1\.6em; line-height:1\.6em">' = '<div .title style="flow:horizontal; position:relative; min-height:1.6em; line-height:1.25em">'
+}
+# Visual da janela do Cliente (classe "cadena" no .app, so no modo que so recebe acesso): titulo forte, texto
+# arejado, o ID num cartao com a cor da marca e o aviso de instalar tambem na cor da marca
+$CssCliente = @"
+html {
+    background-color: transparent;
+}
+
+/* CadenaTech: janela do Cliente */
+.app.cadena .left-pane { padding-bottom: 64px; }
+.app.cadena .left-pane > div:nth-child(1) { padding: 28px 30px 22px 30px; border-spacing: 18px; }
+.app.cadena .title { font-size: 1.75em; font-weight: bold; color: color(text); }
+.app.cadena .lighter-text { font-size: 1em; line-height: 1.5em; }
+.app.cadena .your-desktop { border-left: $CorAvisoTis solid 5px; background: color(gray-bg); border-radius: 10px; padding: 14px 18px 16px 18px; border-spacing: 4px; }
+.app.cadena .your-desktop > div { font-size: 0.85em; font-weight: bold; color: color(lighter-text); }
+.app.cadena div#myid svg#menu { right: 0; }
+.app.cadena .your-desktop input[type=text] { font-size: 2.2em; font-weight: bold; height: 1.35em; color: color(text); background: transparent; }
+.app.cadena div.connect-status { padding: 14px 30px; }
+.app.cadena div.install-me { background: $CorAvisoTis; border-radius: 10px; margin: 0 30px; padding: 16px 18px; }
+.app.cadena div.install-me > div:nth-child(2) { font-size: 0.9em; line-height: 1.45em; }
+"@
+Trocar "$Fonte\src\ui\index.css" @{
+  'html \{\r?\n    background-color: transparent;\r?\n\}' = ($CssCliente -replace "`r`n", "`n").TrimEnd("`n")
 }
 "Marca aplicada"
