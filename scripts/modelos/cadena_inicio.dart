@@ -1,5 +1,5 @@
 // CadenaTech: tela inicial do Tecnico (so acessa), no visual aprovado em 2026-11-08: lateral com as secoes
-// (Clientes, Recentes, Favoritos, Catalogos, Configuracoes) e o cartao da conta com o status dos servidores; barra de
+// (Clientes, Recentes, Favoritos, Configuracoes) e o cartao da conta com o status dos servidores; barra de
 // cima com o ID para conectar, a busca, a ordenacao e a troca entre cartoes e lista. A lista de computadores, o
 // status online e os menus continuam os do RustDesk (PeerTabPage), so com outra aparencia (cadena_cartao.dart).
 // O 2_marca.ps1 copia este arquivo para flutter/lib/desktop/pages/cadena_inicio.dart.
@@ -79,7 +79,6 @@ class _CadenaLateralState extends State<CadenaLateral> {
     (PeerTabIndex.group, 'Clientes', Icons.desktop_windows_outlined),
     (PeerTabIndex.recent, 'Recentes', Icons.history),
     (PeerTabIndex.fav, 'Favoritos', Icons.star_outline),
-    (PeerTabIndex.ab, 'Catálogos', Icons.menu_book_outlined),
   ];
 
   @override
@@ -738,8 +737,7 @@ class CadenaTituloSecao extends StatelessWidget {
     0: ('Recentes', 'Os últimos computadores acessados neste Técnico.'),
     1: ('Favoritos', 'Os computadores marcados com a estrela.'),
     2: ('Rede local', 'Computadores encontrados na mesma rede.'),
-    3: ('Catálogos', 'Catálogos de endereços compartilhados pelo painel.'),
-    4: ('Clientes', 'Computadores com o Cliente instalado. A bolinha verde indica que está ligado e pronto para o acesso.'),
+    4: ('Clientes', 'Computadores com o Cliente instalado, separados por empresa na lista à esquerda. A bolinha verde indica que está ligado e pronto para o acesso.'),
   };
 
   @override

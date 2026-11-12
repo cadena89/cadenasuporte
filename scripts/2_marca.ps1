@@ -413,12 +413,13 @@ fn cadena_perfil() -> serde_json::Value {
         "default-settings": padrao,
         "override-settings": travas
     });
-    // O Cliente nao tem conta nem catalogo de enderecos. O Tecnico entra na API (rustdesk-api-server-pro
-    // com os recursos do CadenaTech) e usa o catalogo de enderecos de la
+    // O Cliente nao tem conta. O Tecnico entra na API (rustdesk-api-server-pro com os recursos do CadenaTech) e ve
+    // os computadores na aba Clientes, separados por empresa. Nenhum dos dois tem catalogo de enderecos: as
+    // empresas, os apelidos e as observacoes ficam no painel
     if !tecnico {
         perfil["disable-account"] = "Y".into();
-        perfil["disable-ab"] = "Y".into();
     }
+    perfil["disable-ab"] = "Y".into();
     perfil
 }
 
@@ -932,6 +933,13 @@ $Tela = [IO.File]::ReadAllText("$PSScriptRoot\modelos\cadena_ftp_tela.dart") -re
 Copy-Item -Force "$PSScriptRoot\modelos\cadena_inicio.dart" "$Fonte\flutter\lib\desktop\pages\cadena_inicio.dart"
 Copy-Item -Force "$PSScriptRoot\modelos\cadena_cartao.dart" "$Fonte\flutter\lib\common\widgets\cadena_cartao.dart"
 & git -C $Fonte add -N flutter/lib/desktop/pages/cadena_inicio.dart flutter/lib/common/widgets/cadena_cartao.dart
+# Aba Clientes: a API manda o apelido do computador (definido no painel, tela Dispositivos) em "alias"; o cartao
+# mostra o apelido no lugar do nome do computador. A empresa vem como grupo (device_group_name)
+Trocar "$Fonte\flutter\lib\common\hbbs\hbbs.dart" @{
+  "  String\? device_group_name;\r?\n  String note = '';" = "  String? device_group_name;`n  String note = '';`n  // CadenaTech: apelido do computador, definido no painel da API`n  String alias = '';"
+  "device_group_name = json\['device_group_name'\] \?\? '',\r?\n        note = json\['note'\] \?\? '';" = "device_group_name = json['device_group_name'] ?? '',`n        note = json['note'] ?? '',`n        alias = json['alias'] ?? '';"
+  '"note": p\.note,' = "`"note`": p.note,`n      `"alias`": p.alias,"
+}
 Trocar "$Fonte\flutter\lib\common\widgets\peer_card.dart" @{
   "import 'dart:math' as math;" = "import 'dart:math' as math;`n`n// CadenaTech: cartao do Tecnico`npart 'cadena_cartao.dart';"
   'Widget _buildPeerCard\(\r?\n      BuildContext context, Peer peer, Rx<BoxDecoration\?> deco\) \{' = "Widget _buildPeerCard(`n      BuildContext context, Peer peer, Rx<BoxDecoration?> deco) {`n    // CadenaTech: cartao novo no Tecnico (cadena_cartao.dart)`n    if (bind.isOutgoingOnly()) return _cadenaCartao(context, peer, deco);"

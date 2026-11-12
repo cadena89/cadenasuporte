@@ -80,15 +80,15 @@ index 3178ec3..e892241 100644
  
 diff --git a/backend/app/controller/admin/cadena.go b/backend/app/controller/admin/cadena.go
 new file mode 100644
-index 0000000..b79596a
+index 0000000..1d7a1cd
 --- /dev/null
 +++ b/backend/app/controller/admin/cadena.go
-@@ -0,0 +1,340 @@
+@@ -0,0 +1,280 @@
 +package admin
 +
 +// CadenaTech: telas do painel acrescentadas pelo CadenaTech.
-+//   - /catalogs/*: catalogos de enderecos compartilhados (shared = 1, user_id = 0), com regra padrao
-+//     para todos os tecnicos e regras por tecnico (address_book_rule).
++//   - /companies/*: empresas que agrupam os computadores na aba Clientes do Tecnico (o computador entra na
++//     empresa pela tela Dispositivos, controller/admin/devices.go).
 +//   - /connections/active: acessos em andamento, a partir da auditoria de conexoes.
 +//   - /connections/disconnect: derruba um acesso (pelo heartbeat do Cliente).
 +//   - /alarms/list: alertas de seguranca enviados pelos Clientes.
@@ -97,13 +97,13 @@ index 0000000..b79596a
 +	"encoding/json"
 +	"strings"
 +	"time"
++	"unicode/utf8"
 +
 +	"rustdesk-api-server-pro/app/desconexao"
 +	"rustdesk-api-server-pro/app/model"
 +	"rustdesk-api-server-pro/config"
 +	"rustdesk-api-server-pro/db"
 +
-+	"github.com/beevik/guid"
 +	"github.com/kataras/iris/v12"
 +	"github.com/kataras/iris/v12/mvc"
 +	"xorm.io/xorm"
@@ -114,10 +114,9 @@ index 0000000..b79596a
 +}
 +
 +func (c *CadenaController) BeforeActivation(b mvc.BeforeActivation) {
-+	b.Handle("GET", "/catalogs/list", "HandleCatalogos")
-+	b.Handle("GET", "/catalogs/users", "HandleTecnicos")
-+	b.Handle("POST", "/catalogs/save", "HandleSalvarCatalogo")
-+	b.Handle("POST", "/catalogs/delete", "HandleExcluirCatalogo")
++	b.Handle("GET", "/companies/list", "HandleEmpresas")
++	b.Handle("POST", "/companies/save", "HandleSalvarEmpresa")
++	b.Handle("POST", "/companies/delete", "HandleExcluirEmpresa")
 +	b.Handle("GET", "/connections/active", "HandleConexoesAtivas")
 +	b.Handle("POST", "/connections/disconnect", "HandleDesconectar")
 +	b.Handle("GET", "/alarms/list", "HandleAlertas")
@@ -228,157 +227,98 @@ index 0000000..b79596a
 +	}, "ok")
 +}
 +
-+type regraForm struct {
-+	UserId int `json:"user_id"`
-+	Rule   int `json:"rule"`
++type empresaForm struct {
++	Id         int    `json:"id"`
++	Nome       string `json:"nome"`
++	Observacao string `json:"observacao"`
 +}
 +
-+type catalogoForm struct {
-+	Id     int         `json:"id"`
-+	Name   string      `json:"name"`
-+	Note   string      `json:"note"`
-+	Rule   int         `json:"rule"`
-+	Regras []regraForm `json:"regras"`
-+}
-+
-+func (c *CadenaController) HandleCatalogos() mvc.Result {
-+	abs := make([]model.AddressBook, 0)
-+	if err := c.Db.Where("shared = ?", true).Asc("name").Find(&abs); err != nil {
++// HandleEmpresas: empresas em ordem de nome, com quantos computadores cada uma tem
++func (c *CadenaController) HandleEmpresas() mvc.Result {
++	empresas := make([]model.Empresa, 0)
++	if err := c.Db.Asc("nome").Find(&empresas); err != nil {
 +		return c.Error(nil, err.Error())
 +	}
 +	list := make([]iris.Map, 0)
-+	for _, ab := range abs {
-+		peers, _ := c.Db.Where("ab_id = ?", ab.Id).Count(&model.Peer{})
-+		regras := make([]model.AddressBookRule, 0)
-+		_ = c.Db.Where("ab_id = ?", ab.Id).Find(&regras)
-+		listaRegras := make([]iris.Map, 0)
-+		for _, r := range regras {
-+			var u model.User
-+			if has, _ := c.Db.ID(r.UserId).Get(&u); !has {
-+				continue
-+			}
-+			listaRegras = append(listaRegras, iris.Map{"user_id": r.UserId, "username": u.Username, "name": u.Name, "rule": r.Rule})
-+		}
++	for _, e := range empresas {
++		n, _ := c.Db.Where("empresa_id = ? and rustdesk_id <> ''", e.Id).Count(&model.Device{})
 +		list = append(list, iris.Map{
-+			"id":         ab.Id,
-+			"guid":       ab.Guid,
-+			"name":       ab.Name,
-+			"note":       ab.Note,
-+			"rule":       ab.Rule,
-+			"peers":      peers,
-+			"regras":     listaRegras,
-+			"created_at": ab.CreatedAt.Format(config.TimeFormat),
++			"id":           e.Id,
++			"nome":         e.Nome,
++			"observacao":   e.Observacao,
++			"computadores": n,
++			"created_at":   e.CreatedAt.Format(config.TimeFormat),
 +		})
 +	}
-+	return c.Success(list, "ok")
++	semEmpresa, _ := c.Db.Where("(empresa_id = 0 or empresa_id IS NULL) and rustdesk_id <> ''").Count(&model.Device{})
++	return c.Success(iris.Map{"empresas": list, "sem_empresa": semEmpresa, "grupo_sem_empresa": config.GrupoClientes()}, "ok")
 +}
 +
-+func (c *CadenaController) HandleTecnicos() mvc.Result {
-+	users := make([]model.User, 0)
-+	if err := c.Db.Where("status = 1").Asc("username").Find(&users); err != nil {
-+		return c.Error(nil, err.Error())
-+	}
-+	list := make([]iris.Map, 0)
-+	for _, u := range users {
-+		list = append(list, iris.Map{"id": u.Id, "username": u.Username, "name": u.Name})
-+	}
-+	return c.Success(list, "ok")
-+}
-+
-+func (c *CadenaController) HandleSalvarCatalogo() mvc.Result {
-+	var form catalogoForm
++func (c *CadenaController) HandleSalvarEmpresa() mvc.Result {
++	var form empresaForm
 +	if err := c.Ctx.ReadJSON(&form); err != nil {
 +		return c.Error(nil, err.Error())
 +	}
-+	form.Name = strings.TrimSpace(form.Name)
-+	if form.Name == "" {
-+		return c.Error(nil, "CatalogNameEmpty")
++	form.Nome = strings.TrimSpace(form.Nome)
++	form.Observacao = strings.TrimSpace(form.Observacao)
++	if form.Nome == "" {
++		return c.Error(nil, "CompanyNameEmpty")
 +	}
-+	if form.Rule < 0 || form.Rule > 3 {
-+		return c.Error(nil, "CatalogRuleInvalid")
++	if utf8.RuneCountInString(form.Nome) > 100 || utf8.RuneCountInString(form.Observacao) > 255 {
++		return c.Error(nil, "DeviceTextTooLong")
 +	}
-+	session := c.Db.NewSession()
-+	defer session.Close()
-+	if err := session.Begin(); err != nil {
-+		return c.Error(nil, err.Error())
++	// O nome identifica o grupo no Tecnico: nao pode repetir (sem diferenciar maiusculas) nem ser o do grupo
++	// dos computadores sem empresa
++	if strings.EqualFold(form.Nome, config.GrupoClientes()) {
++		return c.Error(nil, "CompanyNameDuplicate")
 +	}
-+	var ab model.AddressBook
++	if has, _ := c.Db.Where("lower(nome) = lower(?) and id <> ?", form.Nome, form.Id).Exist(&model.Empresa{}); has {
++		return c.Error(nil, "CompanyNameDuplicate")
++	}
++	e := model.Empresa{Nome: form.Nome, Observacao: form.Observacao}
 +	if form.Id > 0 {
-+		has, err := session.Where("id = ? and shared = ?", form.Id, true).Get(&ab)
-+		if err != nil || !has {
-+			_ = session.Rollback()
-+			return c.Error(nil, "CatalogNotFound")
-+		}
-+		ab.Name, ab.Note, ab.Rule = form.Name, form.Note, form.Rule
-+		if _, err := session.ID(ab.Id).Cols("name", "note", "rule").Update(&ab); err != nil {
-+			_ = session.Rollback()
++		n, err := c.Db.ID(form.Id).Cols("nome", "observacao").Update(&e)
++		if err != nil {
 +			return c.Error(nil, err.Error())
 +		}
-+	} else {
-+		ab = model.AddressBook{
-+			UserId:  0,
-+			Guid:    guid.New().String(),
-+			Name:    form.Name,
-+			Owner:   c.GetUser().Username,
-+			Note:    form.Note,
-+			Rule:    form.Rule,
-+			MaxPeer: model.MaxPeer,
-+			Shared:  true,
++		if n == 0 {
++			return c.Error(nil, "CompanyNotFound")
 +		}
-+		if _, err := session.Insert(&ab); err != nil {
-+			_ = session.Rollback()
-+			return c.Error(nil, err.Error())
-+		}
-+	}
-+	if _, err := session.Where("ab_id = ?", ab.Id).Delete(&model.AddressBookRule{}); err != nil {
-+		_ = session.Rollback()
++		e.Id = form.Id
++	} else if _, err := c.Db.Insert(&e); err != nil {
 +		return c.Error(nil, err.Error())
 +	}
-+	vistos := map[int]bool{}
-+	for _, r := range form.Regras {
-+		if r.UserId <= 0 || vistos[r.UserId] || r.Rule < 0 || r.Rule > 3 {
-+			continue
-+		}
-+		vistos[r.UserId] = true
-+		if _, err := session.Insert(&model.AddressBookRule{AbId: ab.Id, UserId: r.UserId, Rule: r.Rule}); err != nil {
-+			_ = session.Rollback()
-+			return c.Error(nil, err.Error())
-+		}
-+	}
-+	if err := session.Commit(); err != nil {
-+		return c.Error(nil, err.Error())
-+	}
-+	return c.Success(iris.Map{"id": ab.Id}, "CatalogSaved")
++	return c.Success(iris.Map{"id": e.Id}, "CompanySaved")
 +}
 +
-+func (c *CadenaController) HandleExcluirCatalogo() mvc.Result {
-+	var form catalogoForm
++// HandleExcluirEmpresa apaga a empresa; os computadores dela ficam sem empresa (nada mais e apagado)
++func (c *CadenaController) HandleExcluirEmpresa() mvc.Result {
++	var form empresaForm
 +	if err := c.Ctx.ReadJSON(&form); err != nil {
 +		return c.Error(nil, err.Error())
-+	}
-+	var ab model.AddressBook
-+	if has, _ := c.Db.Where("id = ? and shared = ?", form.Id, true).Get(&ab); !has {
-+		return c.Error(nil, "CatalogNotFound")
 +	}
 +	session := c.Db.NewSession()
 +	defer session.Close()
 +	if err := session.Begin(); err != nil {
 +		return c.Error(nil, err.Error())
 +	}
-+	for _, bean := range []interface{}{&model.Peer{}, &model.AddressBookTag{}, &model.AddressBookRule{}} {
-+		if _, err := session.Where("ab_id = ?", ab.Id).Delete(bean); err != nil {
-+			_ = session.Rollback()
-+			return c.Error(nil, err.Error())
-+		}
-+	}
-+	if _, err := session.ID(ab.Id).Delete(&model.AddressBook{}); err != nil {
++	if _, err := session.Where("empresa_id = ?", form.Id).Cols("empresa_id").Update(&model.Device{EmpresaId: 0}); err != nil {
 +		_ = session.Rollback()
 +		return c.Error(nil, err.Error())
++	}
++	n, err := session.ID(form.Id).Delete(&model.Empresa{})
++	if err != nil {
++		_ = session.Rollback()
++		return c.Error(nil, err.Error())
++	}
++	if n == 0 {
++		_ = session.Rollback()
++		return c.Error(nil, "CompanyNotFound")
 +	}
 +	if err := session.Commit(); err != nil {
 +		return c.Error(nil, err.Error())
 +	}
-+	return c.Success(nil, "CatalogDeleted")
++	return c.Success(nil, "CompanyDeleted")
 +}
 +
 +// HandleConexoesAtivas: conexoes registradas pelo Cliente (auditoria) ainda sem fechamento, das ultimas 12
@@ -1177,7 +1117,7 @@ index 926ed0e..f87c4bf 100644
 +	}
  }
 diff --git a/backend/app/controller/api/peer.go b/backend/app/controller/api/peer.go
-index 1f6a795..4ad6fc0 100644
+index 1f6a795..3c335b6 100644
 --- a/backend/app/controller/api/peer.go
 +++ b/backend/app/controller/api/peer.go
 @@ -2,6 +2,7 @@ package api
@@ -1188,13 +1128,15 @@ index 1f6a795..4ad6fc0 100644
  	"rustdesk-api-server-pro/db"
  
  	"github.com/kataras/iris/v12"
-@@ -9,25 +10,41 @@ import (
+@@ -9,25 +10,72 @@ import (
  	"xorm.io/xorm"
  )
  
-+// CadenaTech: grupo em que aparecem, na aba "Grupo" do Tecnico, todos os computadores de clientes que se
-+// registraram na API (o Cliente envia sysinfo/heartbeat sozinho, sem conta). Nome: cadena.grupoClientes do
-+// server.yaml ou RUSTDESK_API_GRUPO_CLIENTES (config/cadena.go)
++// CadenaTech: aba "Clientes" (grupo) do Tecnico. Todo computador de cliente que se registrou na API (o Cliente
++// envia sysinfo/heartbeat sozinho, sem conta) aparece para qualquer tecnico logado, no grupo da empresa dele
++// (tabela empresa, definida no painel). Os que ainda nao tem empresa ficam no grupo cadena.grupoClientes do
++// server.yaml ou RUSTDESK_API_GRUPO_CLIENTES (config/cadena.go). O apelido e a observacao vao em alias e note:
++// a observacao entra na busca do Tecnico
 +
 +
  type PeerController struct {
@@ -1205,12 +1147,41 @@ index 1f6a795..4ad6fc0 100644
 +	b.Handle("GET", "device-group/accessible", "GetDeviceGroupAccessible")
 +}
 +
-+// GetDeviceGroupAccessible devolve o grupo unico com os computadores dos clientes
++// nomesDasEmpresas devolve id -> nome de todas as empresas
++func (c *PeerController) nomesDasEmpresas() map[int]string {
++	empresas := make([]model.Empresa, 0)
++	_ = c.Db.Find(&empresas)
++	nomes := make(map[int]string, len(empresas))
++	for _, e := range empresas {
++		nomes[e.Id] = e.Nome
++	}
++	return nomes
++}
++
++// GetDeviceGroupAccessible devolve as empresas que tem computador e, se houver computador sem empresa, o grupo
++// dos que ainda nao tem
 +func (c *PeerController) GetDeviceGroupAccessible() mvc.Result {
++	usadas := make([]int, 0)
++	if err := c.Db.Table(&model.Device{}).Where("rustdesk_id <> ''").Distinct("empresa_id").Find(&usadas); err != nil {
++		return mvc.Response{Object: iris.Map{"error": err.Error()}}
++	}
++	nomes := c.nomesDasEmpresas()
++	grupos := make([]iris.Map, 0)
++	semEmpresa := false
++	for _, id := range usadas {
++		if nome, ok := nomes[id]; ok {
++			grupos = append(grupos, iris.Map{"name": nome})
++		} else {
++			semEmpresa = true
++		}
++	}
++	if semEmpresa {
++		grupos = append(grupos, iris.Map{"name": config.GrupoClientes()})
++	}
 +	return mvc.Response{
 +		Object: iris.Map{
-+			"total": 1,
-+			"data":  []iris.Map{{"name": config.GrupoClientes()}},
++			"total": len(grupos),
++			"data":  grupos,
 +		},
 +	}
 +}
@@ -1237,12 +1208,18 @@ index 1f6a795..4ad6fc0 100644
  	if err != nil {
  		return mvc.Response{
  			Object: iris.Map{
-@@ -36,17 +53,19 @@ func (c *PeerController) GetPeers() mvc.Result {
+@@ -35,18 +83,26 @@ func (c *PeerController) GetPeers() mvc.Result {
+ 			},
  		}
  	}
++	nomes := c.nomesDasEmpresas()
  	data := make([]iris.Map, 0)
 -	for _, p := range peerList {
 +	for _, d := range deviceList {
++		grupo, ok := nomes[d.EmpresaId]
++		if !ok {
++			grupo = config.GrupoClientes()
++		}
  		data = append(data, iris.Map{
 -			"id": p.RustdeskId,
 +			"id": d.RustdeskId,
@@ -1260,23 +1237,37 @@ index 1f6a795..4ad6fc0 100644
 +			"status":            1,
 +			"user":              "",
 +			"user_name":         "",
-+			"device_group_name": config.GrupoClientes(),
-+			"note":              "",
++			"device_group_name": grupo,
++			"alias":             d.Apelido, // lido pelo Tecnico a partir da v1.0.1 (hbbs.dart)
++			"note":              d.Observacao,
  		})
  	}
  	return mvc.Response{
 diff --git a/backend/app/controller/api/user.go b/backend/app/controller/api/user.go
-index 8241a1d..f646b87 100644
+index 8241a1d..248e8fc 100644
 --- a/backend/app/controller/api/user.go
 +++ b/backend/app/controller/api/user.go
-@@ -31,21 +31,16 @@ func (c *UserController) HandleCurrentUser() mvc.Result {
+@@ -3,11 +3,9 @@ package api
+ import (
+ 	"rustdesk-api-server-pro/app/form/api"
+ 	"rustdesk-api-server-pro/app/model"
+-	"rustdesk-api-server-pro/db"
+ 
+ 	"github.com/kataras/iris/v12"
+ 	"github.com/kataras/iris/v12/mvc"
+-	"xorm.io/xorm"
+ )
+ 
+ type UserController struct {
+@@ -31,48 +29,14 @@ func (c *UserController) HandleCurrentUser() mvc.Result {
  	}
  }
  
-+// GetUsers alimenta a aba "Grupo" do cliente. CadenaTech: qualquer tecnico logado recebe so a propria conta;
-+// os computadores dos clientes ficam no grupo de clientes (config.GrupoClientes, ver peer.go), e nao por usuario
++// GetUsers alimenta a lista da esquerda da aba Clientes (grupo) do Tecnico. CadenaTech: vai vazia; os computadores
++// ficam agrupados por empresa (api/peer.go), e nao por usuario. Antes ia a propria conta, que aparecia na lista
++// como um item sem computadores
  func (c *UserController) GetUsers() mvc.Result {
- 	user := c.GetUser()
+-	user := c.GetUser()
 -	if !user.IsAdmin {
 -		return mvc.Response{
 -			Object: iris.Map{
@@ -1284,16 +1275,44 @@ index 8241a1d..f646b87 100644
 -			},
 -		}
 -	}
- 	current := c.Ctx.URLParamIntDefault("current", 1)
- 	pageSize := c.Ctx.URLParamIntDefault("pageSize", 10)
- 	status := c.Ctx.URLParamIntDefault("status", 1)
- 
- 	query := func() *xorm.Session {
+-	current := c.Ctx.URLParamIntDefault("current", 1)
+-	pageSize := c.Ctx.URLParamIntDefault("pageSize", 10)
+-	status := c.Ctx.URLParamIntDefault("status", 1)
+-
+-	query := func() *xorm.Session {
 -		q := c.Db.Table(&model.User{}).Where("status = ?", status)
-+		q := c.Db.Table(&model.User{}).Where("status = ? and id = ?", status, user.Id)
- 		return q.Desc("id")
+-		return q.Desc("id")
+-	}
+-
+-	pagination := db.NewPagination(current, pageSize)
+-	userList := make([]model.User, 0)
+-	err := pagination.Paginate(query, &model.User{}, &userList)
+-	if err != nil {
+-		return mvc.Response{
+-			Object: iris.Map{
+-				"error": err.Error(),
+-			},
+-		}
+-	}
+-	data := make([]iris.Map, 0)
+-	for _, u := range userList {
+-		data = append(data, iris.Map{
+-			"name":     u.Name,
+-			"email":    u.Email,
+-			"note":     u.Note,
+-			"status":   u.Status,
+-			"is_admin": u.IsAdmin,
+-		})
+-	}
+ 	return mvc.Response{
+ 		Object: iris.Map{
+-			"total": pagination.TotalCount,
+-			"data":  data,
++			"total": 0,
++			"data":  []iris.Map{},
+ 		},
  	}
- 
+ }
 diff --git a/backend/app/jobs.go b/backend/app/jobs.go
 index a891945..784461b 100644
 --- a/backend/app/jobs.go
@@ -1458,18 +1477,23 @@ index aaaeee0..eff8b95 100644
  	CreatedAt  time.Time `xorm:"'created_at' datetime created"`
  	UpdatedAt  time.Time `xorm:"'updated_at' datetime updated"`
 diff --git a/backend/app/model/device.go b/backend/app/model/device.go
-index 46ad855..4731397 100644
+index 46ad855..6865c3a 100644
 --- a/backend/app/model/device.go
 +++ b/backend/app/model/device.go
-@@ -12,7 +12,7 @@ type Device struct {
+@@ -12,8 +12,12 @@ type Device struct {
  	Username   string    `xorm:"'username' varchar(255)"`
  	Uuid       string    `xorm:"'uuid' varchar(255)"`
  	Version    string    `xorm:"'version' varchar(255)"`
 -	IsOnline   bool      `xorm:"'is_online' tinyint"`
 +	IsOnline   bool      `xorm:"'is_online' bool"`
  	Conns      int       `xorm:"'conns' int"`
++	// CadenaTech: empresa (0 = sem empresa), apelido e observacao, definidos no painel (Dispositivos)
++	EmpresaId  int       `xorm:"'empresa_id' int default 0"`
++	Apelido    string    `xorm:"'apelido' varchar(100) default ''"`
++	Observacao string    `xorm:"'observacao' varchar(255) default ''"`
  	CreatedAt  time.Time `xorm:"'created_at' datetime created"`
  	UpdatedAt  time.Time `xorm:"'updated_at' datetime updated"`
+ }
 diff --git a/backend/app/model/file_transfer.go b/backend/app/model/file_transfer.go
 index 2c84443..d780b30 100644
 --- a/backend/app/model/file_transfer.go
@@ -1564,10 +1588,10 @@ index cd8b90a..64ad1f7 100644
  
 diff --git a/backend/cmd/migrar.go b/backend/cmd/migrar.go
 new file mode 100644
-index 0000000..f2544d5
+index 0000000..b44813b
 --- /dev/null
 +++ b/backend/cmd/migrar.go
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,160 @@
 +package cmd
 +
 +// CadenaTech: copia todos os dados de um banco para outro (ex.: SQLite -> PostgreSQL), mantendo ids e datas.
@@ -1611,6 +1635,7 @@ index 0000000..f2544d5
 +		new(model.Alarm),        // CadenaTech: alertas de seguranca
 +		new(model.ConsoleAudit), // CadenaTech: acoes do painel
 +		new(model.WebhookEnvio), // CadenaTech: envios do webhook de eventos (N8N)
++		new(model.Empresa),      // CadenaTech: empresas que agrupam os computadores
 +	}
 +}
 +
@@ -1764,7 +1789,7 @@ index 3adc23a..dcf57ca 100644
  			fmt.Println("Db init error:", err)
 diff --git a/backend/config/cadena.go b/backend/config/cadena.go
 new file mode 100644
-index 0000000..7e807f2
+index 0000000..1538720
 --- /dev/null
 +++ b/backend/config/cadena.go
 @@ -0,0 +1,201 @@
@@ -1777,7 +1802,7 @@ index 0000000..7e807f2
 +//   RUSTDESK_API_DB_DRIVER   sqlite | mysql | postgres
 +//   RUSTDESK_API_DB_DSN      ex.: postgres://usuario:senha@127.0.0.1:5432/cadenasuporte?sslmode=disable
 +//   RUSTDESK_API_SIGN_KEY    chave que assina os tokens
-+//   RUSTDESK_API_GRUPO_CLIENTES  nome do grupo da aba "Grupo" do Tecnico (padrao "Clientes")
++//   RUSTDESK_API_GRUPO_CLIENTES  grupo da aba Clientes do Tecnico com os computadores ainda sem empresa (padrao "Sem empresa")
 +//   RUSTDESK_API_PASTAS_GRAVACOES  pastas das gravacoes enviadas por FTP, separadas por ";"
 +//   RUSTDESK_API_DIAS_REGISTROS    dias de guarda de acessos, transferencias e alertas (0 = sempre)
 +//   RUSTDESK_API_DIAS_GRAVACOES    dias de guarda das gravacoes (0 = sempre)
@@ -1796,7 +1821,7 @@ index 0000000..7e807f2
 +)
 +
 +type CadenaConfig struct {
-+	// Nome do grupo em que aparecem, na aba "Grupo" do Tecnico, os computadores dos clientes
++	// Grupo da aba Clientes do Tecnico com os computadores que ainda nao tem empresa (os demais ficam no grupo da empresa)
 +	GrupoClientes string `yaml:"grupoClientes"`
 +	// Pastas onde chegam as gravacoes enviadas pelo Tecnico (FTP), mostradas no Registro de acessos
 +	PastasGravacoes []string `yaml:"pastasGravacoes"`
@@ -1959,10 +1984,10 @@ index 0000000..7e807f2
 +	return d
 +}
 +
-+// GrupoClientes devolve o nome do grupo dos computadores dos clientes (lido uma vez)
++// GrupoClientes devolve o nome do grupo dos computadores sem empresa (lido uma vez)
 +func GrupoClientes() string {
 +	grupoOnce.Do(func() {
-+		grupo = "Clientes"
++		grupo = "Sem empresa"
 +		if cfg := GetServerConfig(); cfg.Cadena != nil && strings.TrimSpace(cfg.Cadena.GrupoClientes) != "" {
 +			grupo = strings.TrimSpace(cfg.Cadena.GrupoClientes)
 +		}
@@ -3055,7 +3080,7 @@ index 0000000..d0f2ed3
 +	delete(tentativasLogin, chave)
 +}
 diff --git a/soybean-admin/src/locales/langs/en-us.ts b/soybean-admin/src/locales/langs/en-us.ts
-index 5d659c3..88302d0 100644
+index 5d659c3..943d792 100644
 --- a/soybean-admin/src/locales/langs/en-us.ts
 +++ b/soybean-admin/src/locales/langs/en-us.ts
 @@ -166,7 +166,11 @@ const local: App.I18n.Schema = {
@@ -3067,7 +3092,7 @@ index 5d659c3..88302d0 100644
 +    audit_console: 'Console actions',
 +    devices: 'Devices',
 +    connections: 'Active connections',
-+    catalogs: 'Shared address books'
++    catalogs: 'Companies'
    },
    page: {
      login: {
@@ -3089,10 +3114,10 @@ index 18550e7..2e63b5f 100644
    home: () => import("@/views/home/index.vue"),
    system_mail_logs: () => import("@/views/system/mail_logs/index.vue"),
 diff --git a/soybean-admin/src/router/elegant/routes.ts b/soybean-admin/src/router/elegant/routes.ts
-index d96117d..4c38813 100644
+index d96117d..eae1beb 100644
 --- a/soybean-admin/src/router/elegant/routes.ts
 +++ b/soybean-admin/src/router/elegant/routes.ts
-@@ -50,6 +50,26 @@ export const generatedRoutes: GeneratedRoute[] = [
+@@ -50,6 +50,16 @@ export const generatedRoutes: GeneratedRoute[] = [
        order: 3
      },
      children: [
@@ -3106,6 +3131,13 @@ index d96117d..4c38813 100644
 +          icon: 'mdi:shield-alert-outline'
 +        }
 +      },
+       {
+         name: 'audit_baselogs',
+         path: '/audit/baselogs',
+@@ -60,6 +70,16 @@ export const generatedRoutes: GeneratedRoute[] = [
+           icon: 'hugeicons:files-01'
+         }
+       },
 +      {
 +        name: 'audit_console',
 +        path: '/audit/console',
@@ -3117,8 +3149,8 @@ index d96117d..4c38813 100644
 +        }
 +      },
        {
-         name: 'audit_baselogs',
-         path: '/audit/baselogs',
+         name: 'audit_filetransferlogs',
+         path: '/audit/filetransferlogs',
 @@ -72,6 +92,29 @@ export const generatedRoutes: GeneratedRoute[] = [
        }
      ]
@@ -3130,7 +3162,7 @@ index d96117d..4c38813 100644
 +    meta: {
 +      title: 'catalogs',
 +      i18nKey: 'route.catalogs',
-+      icon: 'mdi:book-account-outline',
++      icon: 'mdi:domain',
 +      order: 7,
 +      roles: ['R_SUPER']
 +    }
@@ -3198,35 +3230,33 @@ index 0bf5641..a1e1926 100644
    "iframe-page": "/iframe-page/:url",
 diff --git a/soybean-admin/src/service/api/cadena.ts b/soybean-admin/src/service/api/cadena.ts
 new file mode 100644
-index 0000000..e5019da
+index 0000000..e5c3205
 --- /dev/null
 +++ b/soybean-admin/src/service/api/cadena.ts
-@@ -0,0 +1,102 @@
-+// CadenaTech: catalogos compartilhados e acessos em andamento (backend: app/controller/admin/cadena.go)
+@@ -0,0 +1,104 @@
++// CadenaTech: empresas, edicao dos dispositivos e acessos em andamento
++// (backend: app/controller/admin/cadena.go e devices.go)
 +import { request } from '../request';
 +
-+export interface CadenaRegra {
-+  user_id: number;
-+  username?: string;
-+  name?: string;
-+  rule: number;
-+}
-+
-+export interface CadenaCatalogo {
++export interface CadenaEmpresa {
 +  id: number;
-+  guid?: string;
-+  name: string;
-+  note: string;
-+  rule: number;
-+  peers?: number;
-+  regras: CadenaRegra[];
++  nome: string;
++  observacao: string;
++  computadores?: number;
 +  created_at?: string;
 +}
 +
-+export interface CadenaTecnico {
++export interface CadenaEmpresas {
++  empresas: CadenaEmpresa[];
++  sem_empresa: number;
++  grupo_sem_empresa: string;
++}
++
++export interface CadenaDispositivoEdicao {
 +  id: number;
-+  username: string;
-+  name: string;
++  empresa_id: number;
++  apelido: string;
++  observacao: string;
 +}
 +
 +export interface CadenaConexao {
@@ -3254,20 +3284,24 @@ index 0000000..e5019da
 +  created_at: string;
 +}
 +
-+export function fetchCatalogos() {
-+  return request<CadenaCatalogo[]>({ url: '/catalogs/list' });
++export function fetchEmpresas() {
++  return request<CadenaEmpresas>({ url: '/companies/list' });
 +}
 +
-+export function fetchTecnicos() {
-+  return request<CadenaTecnico[]>({ url: '/catalogs/users' });
++export function salvarEmpresa(data: CadenaEmpresa) {
++  return request<{ id: number }>({ url: '/companies/save', method: 'post', data });
 +}
 +
-+export function salvarCatalogo(data: CadenaCatalogo) {
-+  return request({ url: '/catalogs/save', method: 'post', data });
++export function excluirEmpresa(id: number) {
++  return request({ url: '/companies/delete', method: 'post', data: { id } });
 +}
 +
-+export function excluirCatalogo(id: number) {
-+  return request({ url: '/catalogs/delete', method: 'post', data: { id } });
++export function editarDispositivo(data: CadenaDispositivoEdicao) {
++  return request({ url: '/devices/edit', method: 'post', data });
++}
++
++export function moverParaEmpresa(ids: number[], empresa_id: number) {
++  return request({ url: '/devices/company', method: 'post', data: { ids, empresa_id } });
 +}
 +
 +export function fetchConexoesAtivas() {
@@ -3345,123 +3379,88 @@ index 804b505..4b7ae4d 100644
      | "system_mail_logs"
 diff --git a/soybean-admin/src/views/catalogs/index.vue b/soybean-admin/src/views/catalogs/index.vue
 new file mode 100644
-index 0000000..b64cc9d
+index 0000000..e8525ed
 --- /dev/null
 +++ b/soybean-admin/src/views/catalogs/index.vue
-@@ -0,0 +1,210 @@
+@@ -0,0 +1,164 @@
 +<script setup lang="tsx">
-+// CadenaTech: catalogos de enderecos compartilhados entre os tecnicos. Cada catalogo tem uma permissao padrao
-+// para todos e, se preciso, permissoes por tecnico. Os computadores entram pelo proprio programa Tecnico.
++// CadenaTech: empresas (clientes). Cada empresa vira um grupo na aba Clientes do programa Técnico, com os
++// computadores dela. O computador entra na empresa pela tela Dispositivos.
 +import { onMounted, reactive, ref } from 'vue';
-+import { NButton, NPopconfirm, NSpace, NTag } from 'naive-ui';
++import { useRouter } from 'vue-router';
++import { NButton, NPopconfirm, NSpace } from 'naive-ui';
 +import type { DataTableColumns } from 'naive-ui';
 +import { $t } from '@/locales';
-+import {
-+  excluirCatalogo,
-+  fetchCatalogos,
-+  fetchTecnicos,
-+  salvarCatalogo,
-+  type CadenaCatalogo,
-+  type CadenaTecnico
-+} from '@/service/api/cadena';
++import { excluirEmpresa, fetchEmpresas, salvarEmpresa, type CadenaEmpresa } from '@/service/api/cadena';
 +
-+defineOptions({ name: 'CadenaCatalogos' });
++defineOptions({ name: 'CadenaEmpresas' });
 +
-+const regras = [
-+  { label: 'Sem acesso', value: 0 },
-+  { label: 'Só ver', value: 1 },
-+  { label: 'Ver e editar', value: 2 },
-+  { label: 'Controle total', value: 3 }
-+];
-+const corRegra: Record<number, 'default' | 'info' | 'success' | 'warning'> = {
-+  0: 'default',
-+  1: 'info',
-+  2: 'success',
-+  3: 'warning'
-+};
-+const nomeRegra = (r: number) => regras.find(x => x.value === r)?.label || String(r);
-+
-+const lista = ref<CadenaCatalogo[]>([]);
-+const tecnicos = ref<CadenaTecnico[]>([]);
++const router = useRouter();
++const lista = ref<CadenaEmpresa[]>([]);
++const semEmpresa = ref(0);
++const grupoSemEmpresa = ref('');
 +const carregando = ref(false);
 +const salvando = ref(false);
 +const modal = ref(false);
-+const form = reactive<CadenaCatalogo>({ id: 0, name: '', note: '', rule: 1, regras: [] });
++const form = reactive<CadenaEmpresa>({ id: 0, nome: '', observacao: '' });
 +
 +async function carregar() {
 +  carregando.value = true;
-+  const [c, t] = await Promise.all([fetchCatalogos(), fetchTecnicos()]);
-+  if (!c.error) lista.value = c.data || [];
-+  if (!t.error) tecnicos.value = t.data || [];
++  const r = await fetchEmpresas();
++  if (!r.error) {
++    lista.value = r.data.empresas || [];
++    semEmpresa.value = r.data.sem_empresa || 0;
++    grupoSemEmpresa.value = r.data.grupo_sem_empresa || '';
++  }
 +  carregando.value = false;
 +}
 +
-+function abrir(cat?: CadenaCatalogo) {
-+  Object.assign(form, {
-+    id: cat?.id || 0,
-+    name: cat?.name || '',
-+    note: cat?.note || '',
-+    rule: cat ? cat.rule : 1,
-+    regras: (cat?.regras || []).map(r => ({ user_id: r.user_id, rule: r.rule }))
-+  });
++function abrir(e?: CadenaEmpresa) {
++  Object.assign(form, { id: e?.id || 0, nome: e?.nome || '', observacao: e?.observacao || '' });
 +  modal.value = true;
 +}
 +
-+function adicionarRegra() {
-+  form.regras.push({ user_id: 0, rule: 2 });
-+}
-+
 +async function salvar() {
-+  if (!form.name.trim()) {
-+    window.$message?.error($t('api.CatalogNameEmpty' as App.I18n.I18nKey));
++  if (!form.nome.trim()) {
++    window.$message?.error($t('api.CompanyNameEmpty' as App.I18n.I18nKey));
 +    return;
 +  }
 +  salvando.value = true;
-+  const res = await salvarCatalogo({ ...form, regras: form.regras.filter(r => r.user_id > 0) });
++  const res = await salvarEmpresa({ ...form });
 +  salvando.value = false;
 +  if (!res.error) {
-+    window.$message?.success($t('api.CatalogSaved' as App.I18n.I18nKey));
++    window.$message?.success($t('api.CompanySaved' as App.I18n.I18nKey));
 +    modal.value = false;
 +    await carregar();
 +  }
 +}
 +
-+async function excluir(cat: CadenaCatalogo) {
-+  const res = await excluirCatalogo(cat.id);
++async function excluir(e: CadenaEmpresa) {
++  const res = await excluirEmpresa(e.id);
 +  if (!res.error) {
-+    window.$message?.success($t('api.CatalogDeleted' as App.I18n.I18nKey));
++    window.$message?.success($t('api.CompanyDeleted' as App.I18n.I18nKey));
 +    await carregar();
 +  }
 +}
 +
-+const colunas: DataTableColumns<CadenaCatalogo> = [
-+  { key: 'name', title: 'Catálogo', align: 'left', minWidth: 180 },
-+  { key: 'note', title: 'Observação', align: 'left', minWidth: 180 },
-+  { key: 'peers', title: 'Computadores', align: 'center', width: 120 },
++// Abre os Dispositivos já filtrados pela empresa (0 = sem empresa)
++function verComputadores(id: number) {
++  router.push({ name: 'devices', query: { empresa_id: String(id) } });
++}
++
++const colunas: DataTableColumns<CadenaEmpresa> = [
++  { key: 'nome', title: 'Empresa', align: 'left', minWidth: 200 },
++  { key: 'observacao', title: 'Observação', align: 'left', minWidth: 220, render: row => row.observacao || '—' },
 +  {
-+    key: 'rule',
-+    title: 'Todos os técnicos',
++    key: 'computadores',
++    title: 'Computadores',
 +    align: 'center',
-+    width: 150,
-+    render: row => <NTag type={corRegra[row.rule]}>{nomeRegra(row.rule)}</NTag>
-+  },
-+  {
-+    key: 'regras',
-+    title: 'Exceções por técnico',
-+    align: 'left',
-+    minWidth: 220,
-+    render: row =>
-+      row.regras.length === 0 ? (
-+        '—'
-+      ) : (
-+        <NSpace size="small">
-+          {row.regras.map(r => (
-+            <NTag size="small" type={corRegra[r.rule]}>
-+              {`${r.name || r.username}: ${nomeRegra(r.rule)}`}
-+            </NTag>
-+          ))}
-+        </NSpace>
-+      )
++    width: 130,
++    render: row => (
++      <NButton text type="primary" onClick={() => verComputadores(row.id)}>
++        {String(row.computadores ?? 0)}
++      </NButton>
++    )
 +  },
 +  {
 +    key: 'acoes',
@@ -3479,7 +3478,10 @@ index 0000000..b64cc9d
 +          onPositiveClick={() => excluir(row)}
 +        >
 +          {{
-+            default: () => 'Excluir o catálogo e todos os computadores dele?',
++            default: () =>
++              row.computadores
++                ? `Excluir a empresa? Os ${row.computadores} computadores dela ficam sem empresa.`
++                : 'Excluir a empresa?',
 +            trigger: () => (
 +              <NButton size="small" type="error">
 +                {$t('common.delete')}
@@ -3498,7 +3500,7 @@ index 0000000..b64cc9d
 +<template>
 +  <div class="flex-col-stretch gap-16px">
 +    <NCard :bordered="false" size="small" class="card-wrapper">
-+      <template #header>Catálogos compartilhados</template>
++      <template #header>Empresas</template>
 +      <template #header-extra>
 +        <NSpace wrap justify="end">
 +          <NButton size="small" ghost type="primary" @click="abrir()">
@@ -3516,38 +3518,24 @@ index 0000000..b64cc9d
 +        </NSpace>
 +      </template>
 +      <p class="pb-12px text-13px opacity-80">
-+        Catálogos que todos os técnicos veem no programa Técnico, na aba de catálogo de endereços. Os computadores são
-+        incluídos pelo próprio programa, por quem tem permissão de editar.
++        No programa Técnico, a aba Clientes mostra uma lista com estas empresas, e cada uma abre os computadores dela.
++        Para pôr um computador numa empresa e dar um apelido a ele, use a tela Dispositivos.
 +      </p>
-+      <NDataTable :columns="colunas" :data="lista" :loading="carregando" size="small" :row-key="row => row.id" :scroll-x="1100" />
++      <NAlert v-if="semEmpresa > 0" type="info" :bordered="false" class="mb-12px">
++        {{ semEmpresa }} {{ semEmpresa === 1 ? 'computador ainda não tem' : 'computadores ainda não têm' }} empresa e
++        {{ semEmpresa === 1 ? 'aparece' : 'aparecem' }} no grupo “{{ grupoSemEmpresa }}”.
++        <NButton text type="primary" class="ml-4px" @click="verComputadores(0)">Ver e organizar</NButton>
++      </NAlert>
++      <NDataTable :columns="colunas" :data="lista" :loading="carregando" size="small" :row-key="row => row.id" :scroll-x="760" />
 +    </NCard>
 +
-+    <NModal v-model:show="modal" preset="card" :title="form.id ? 'Editar catálogo' : 'Novo catálogo'" class="w-640px">
++    <NModal v-model:show="modal" preset="card" :title="form.id ? 'Editar empresa' : 'Nova empresa'" class="w-520px">
 +      <NForm label-placement="top">
 +        <NFormItem label="Nome">
-+          <NInput v-model:value="form.name" placeholder="ex.: Clientes" maxlength="100" />
++          <NInput v-model:value="form.nome" placeholder="ex.: Loja Jacarandá" maxlength="100" />
 +        </NFormItem>
 +        <NFormItem label="Observação">
-+          <NInput v-model:value="form.note" placeholder="opcional" maxlength="255" />
-+        </NFormItem>
-+        <NFormItem label="Permissão de todos os técnicos">
-+          <NSelect v-model:value="form.rule" :options="regras" />
-+        </NFormItem>
-+        <NFormItem label="Exceções por técnico (valem no lugar da permissão acima)">
-+          <div class="w-full flex-col gap-8px">
-+            <div v-for="(r, i) in form.regras" :key="i" class="flex gap-8px">
-+              <NSelect
-+                v-model:value="r.user_id"
-+                class="flex-1"
-+                placeholder="Técnico"
-+                filterable
-+                :options="tecnicos.map(t => ({ label: `${t.name || t.username} (${t.username})`, value: t.id }))"
-+              />
-+              <NSelect v-model:value="r.rule" class="w-170px" :options="regras" />
-+              <NButton quaternary type="error" @click="form.regras.splice(i, 1)">Remover</NButton>
-+            </div>
-+            <NButton dashed size="small" @click="adicionarRegra">Adicionar exceção</NButton>
-+          </div>
++          <NInput v-model:value="form.observacao" placeholder="opcional" maxlength="255" />
 +        </NFormItem>
 +      </NForm>
 +      <template #footer>
@@ -3926,7 +3914,7 @@ index 5cfa31e..436fb71 100644
  </template>
  
 diff --git a/soybean-admin/src/typings/api.d.ts b/soybean-admin/src/typings/api.d.ts
-index 1513bc1..d6e11b3 100644
+index 1513bc1..1f8cd97 100644
 --- a/soybean-admin/src/typings/api.d.ts
 +++ b/soybean-admin/src/typings/api.d.ts
 @@ -36,6 +36,8 @@ declare namespace Api {
@@ -3947,7 +3935,21 @@ index 1513bc1..d6e11b3 100644
        admin_status: number;
        tfa_code: string;
      }>;
-@@ -134,6 +138,15 @@ declare namespace Api {
+@@ -126,14 +130,28 @@ declare namespace Api {
+       os: string;
+       memory: string;
+       created_at: string;
++      /** CadenaTech: empresa (0 = sem empresa), apelido e observacao */
++      empresa_id: number;
++      empresa: string;
++      apelido: string;
++      observacao: string;
+     }>;
+     type DevicesList = Common.PaginatingQueryRecord<Device>;
+     type DeviceSearchParams = CommonType.RecordNullable<
+-      Pick<Api.Devices.Device, 'username' | 'hostname' | 'rustdesk_id'> & Api.Common.CommonSearchParams
++      Pick<Api.Devices.Device, 'username' | 'hostname' | 'rustdesk_id' | 'empresa_id'> & Api.Common.CommonSearchParams
+     >;
    }
  
    namespace Audit {
@@ -3963,7 +3965,7 @@ index 1513bc1..d6e11b3 100644
      type AuditLog = Common.CommonRecord<{
        username: string;
        conn_id: string;
-@@ -142,7 +155,10 @@ declare namespace Api {
+@@ -142,7 +160,10 @@ declare namespace Api {
        session_id: string;
        uuid: string;
        type: number;
@@ -4266,7 +4268,7 @@ index 0000000..54955fc
 +	return "alarm"
 +}
 diff --git a/backend/app/controller/api/system.go b/backend/app/controller/api/system.go
-index 6ec7fa6..93b4eaa 100644
+index 6ec7fa6..88cfba6 100644
 --- a/backend/app/controller/api/system.go
 +++ b/backend/app/controller/api/system.go
 @@ -1,6 +1,7 @@
@@ -4299,6 +4301,27 @@ index 6ec7fa6..93b4eaa 100644
  	}
  }
  
+@@ -140,7 +145,19 @@ func (c *SystemController) PostSysinfo() mvc.Result {
+ 	device.Uuid = form.Uuid
+ 	device.Version = NormalizeReportedVersion(form.Version, form.Ver)
+ 
+-	c.Db.Where("id = ?", device.Id).Update(&device)
++	// CadenaTech: so as colunas do sysinfo que vieram preenchidas (como antes, campo vazio nao apaga o gravado),
++	// para nao desfazer a empresa/apelido/observacao editados no painel entre o Get e o Update
++	colunas := make([]string, 0, 8)
++	for coluna, valor := range map[string]string{"cpu": device.Cpu, "hostname": device.Hostname,
++		"rustdesk_id": device.RustdeskId, "memory": device.Memory, "os": device.Os, "username": device.Username,
++		"uuid": device.Uuid, "version": device.Version} {
++		if valor != "" {
++			colunas = append(colunas, coluna)
++		}
++	}
++	if len(colunas) > 0 {
++		c.Db.Where("id = ?", device.Id).Cols(colunas...).Update(&device)
++	}
+ 
+ 	return mvc.Response{
+ 		Text: "SYSINFO_UPDATED",
 diff --git a/soybean-admin/src/views/audit/alarms/index.vue b/soybean-admin/src/views/audit/alarms/index.vue
 new file mode 100644
 index 0000000..167b59a
@@ -4517,10 +4540,10 @@ index 0000000..6de1d32
 +}
 diff --git a/backend/app/acoes/acoes.go b/backend/app/acoes/acoes.go
 new file mode 100644
-index 0000000..910842b
+index 0000000..d563b03
 --- /dev/null
 +++ b/backend/app/acoes/acoes.go
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,117 @@
 +package acoes
 +
 +// CadenaTech: registro das acoes do painel (tabela console_audit). Gravado pelo middleware de todas as chamadas do
@@ -4543,8 +4566,10 @@ index 0000000..910842b
 +	"/admin/users/edit":             "Editou usuário",
 +	"/admin/users/delete":           "Excluiu usuário",
 +	"/admin/users/totp":             "Gerou chave 2FA",
-+	"/admin/catalogs/save":          "Salvou catálogo",
-+	"/admin/catalogs/delete":        "Excluiu catálogo",
++	"/admin/companies/save":         "Salvou empresa",
++	"/admin/companies/delete":       "Excluiu empresa",
++	"/admin/devices/edit":           "Editou dispositivo",
++	"/admin/devices/company":        "Mudou a empresa de dispositivos",
 +	"/admin/connections/disconnect": "Derrubou acesso",
 +	"/admin/sessions/kill":          "Encerrou sessão de login",
 +	"/admin/mail/templates/add":     "Criou modelo de e-mail",
@@ -4584,7 +4609,7 @@ index 0000000..910842b
 +		}
 +	}
 +	partes := []string{}
-+	for _, k := range []string{"username", "name", "rustdesk_id", "id", "ids"} {
++	for _, k := range []string{"username", "name", "nome", "rustdesk_id", "id", "ids"} {
 +		if v, ok := limpo[k]; ok && v != nil && v != "" {
 +			b, _ := json.Marshal(v)
 +			partes = append(partes, k+": "+strings.Trim(string(b), `"`))
@@ -5117,10 +5142,10 @@ index 0000000..38fc4b8
 +}
 diff --git a/backend/app/webhook/webhook.go b/backend/app/webhook/webhook.go
 new file mode 100644
-index 0000000..004d67c
+index 0000000..43b0418
 --- /dev/null
 +++ b/backend/app/webhook/webhook.go
-@@ -0,0 +1,297 @@
+@@ -0,0 +1,313 @@
 +// Package webhook manda os eventos de acesso do RustDesk para um webhook (N8N), que os repassa ao WhatsApp
 +// (Evolution API). CadenaTech.
 +//
@@ -5162,7 +5187,8 @@ index 0000000..004d67c
 +	Evento          string `json:"evento"`
 +	Quando          string `json:"quando"` // RFC 3339, horario do servidor
 +	ClienteId       string `json:"cliente_id"`
-+	ClienteNome     string `json:"cliente_nome,omitempty"` // nome do computador (tabela device)
++	ClienteNome     string `json:"cliente_nome,omitempty"` // apelido do computador ou, sem apelido, o nome dele (tabela device)
++	Empresa         string `json:"empresa,omitempty"`      // empresa do computador (tabela empresa)
 +	TecnicoId       string `json:"tecnico_id,omitempty"`
 +	TecnicoNome     string `json:"tecnico_nome,omitempty"`
 +	Tipo            string `json:"tipo,omitempty"`   // controle | arquivos | tunel
@@ -5286,7 +5312,7 @@ index 0000000..004d67c
 +		e.Quando = time.Now().Format(time.RFC3339)
 +	}
 +	if e.ClienteNome == "" {
-+		e.ClienteNome = nomeDoComputador(e.ClienteId)
++		e.ClienteNome, e.Empresa = nomeDoComputador(e.ClienteId)
 +	}
 +	e.Mensagem = Mensagem(e)
 +	corpo, err := json.Marshal(e)
@@ -5349,15 +5375,26 @@ index 0000000..004d67c
 +	return resp.StatusCode, ""
 +}
 +
-+func nomeDoComputador(rustdeskId string) string {
++// nomeDoComputador devolve o apelido do computador (ou o nome, sem apelido) e a empresa dele
++func nomeDoComputador(rustdeskId string) (nome, empresa string) {
 +	if db.DbEngine == nil || rustdeskId == "" {
-+		return ""
++		return "", ""
 +	}
 +	d := &model.Device{}
-+	if ok, err := db.DbEngine.Where("rustdesk_id = ?", rustdeskId).Desc("updated_at").Get(d); err == nil && ok {
-+		return d.Hostname
++	if ok, err := db.DbEngine.Where("rustdesk_id = ?", rustdeskId).Desc("updated_at").Get(d); err != nil || !ok {
++		return "", ""
 +	}
-+	return ""
++	nome = d.Hostname
++	if d.Apelido != "" {
++		nome = d.Apelido
++	}
++	if d.EmpresaId > 0 {
++		var emp model.Empresa
++		if ok, _ := db.DbEngine.ID(d.EmpresaId).Get(&emp); ok {
++			empresa = emp.Nome
++		}
++	}
++	return nome, empresa
 +}
 +
 +// Mensagem monta o texto do WhatsApp
@@ -5412,6 +5449,10 @@ index 0000000..004d67c
 +			l = append(l, fmt.Sprintf("Arquivos: %d", e.Arquivos))
 +		}
 +	}
++	// Empresa logo abaixo da linha do cliente
++	if e.Empresa != "" && len(l) >= 2 {
++		l = append(l[:2], append([]string{"Empresa: " + e.Empresa}, l[2:]...)...)
++	}
 +	if e.Origem != "" {
 +		l = append(l, "IP: "+e.Origem)
 +	}
@@ -5420,10 +5461,10 @@ index 0000000..004d67c
 +}
 diff --git a/backend/app/webhook/webhook_test.go b/backend/app/webhook/webhook_test.go
 new file mode 100644
-index 0000000..b62679f
+index 0000000..bf7ef9b
 --- /dev/null
 +++ b/backend/app/webhook/webhook_test.go
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,116 @@
 +package webhook
 +
 +import (
@@ -5481,6 +5522,18 @@ index 0000000..b62679f
 +	}
 +}
 +
++func TestMensagemComEmpresa(t *testing.T) {
++	m := Mensagem(Evento{Evento: AcessoIniciado, ClienteId: "124326369", ClienteNome: "Caixa 1", Empresa: "Loja Jacarandá",
++		TecnicoNome: "Cesar Cadena", Tipo: "controle", Quando: "2026-11-12T10:00:00-03:00"})
++	linhas := strings.Split(m, "\n")
++	if len(linhas) < 3 || linhas[1] != "Cliente: Caixa 1 (124326369)" || linhas[2] != "Empresa: Loja Jacarandá" {
++		t.Errorf("mensagem:\n%s", m)
++	}
++	if !strings.Contains(m, "Técnico: Cesar Cadena") || !strings.HasSuffix(m, "Quando: 12/11/2026 10:00") {
++		t.Errorf("mensagem:\n%s", m)
++	}
++}
++
 +func TestTentaDeNovoQuandoFalha(t *testing.T) {
 +	var chamadas int32
 +	ok := make(chan struct{}, 1)
@@ -5528,3 +5581,510 @@ index 0000000..b62679f
 +		t.Error("validacao deveria recusar evento desconhecido e cliente vazio")
 +	}
 +}
+diff --git a/backend/app/model/empresa.go b/backend/app/model/empresa.go
+new file mode 100644
+index 0000000..4eeb6a6
+--- /dev/null
++++ b/backend/app/model/empresa.go
+@@ -0,0 +1,17 @@
++package model
++
++import "time"
++
++// CadenaTech: empresa (cliente) que agrupa os computadores. Cada empresa e um grupo na aba Clientes do Tecnico
++// (api/peer.go); o computador aponta para ela por device.empresa_id (0 = sem empresa)
++type Empresa struct {
++	Id         int       `xorm:"'id' int notnull pk autoincr"`
++	Nome       string    `xorm:"'nome' varchar(100) notnull"`
++	Observacao string    `xorm:"'observacao' varchar(255) default ''"`
++	CreatedAt  time.Time `xorm:"'created_at' datetime created"`
++	UpdatedAt  time.Time `xorm:"'updated_at' datetime updated"`
++}
++
++func (m *Empresa) TableName() string {
++	return "empresa"
++}
+diff --git a/backend/app/controller/admin/devices.go b/backend/app/controller/admin/devices.go
+index b8c5dbf..f873b80 100644
+--- a/backend/app/controller/admin/devices.go
++++ b/backend/app/controller/admin/devices.go
+@@ -1,6 +1,9 @@
+ package admin
+ 
+ import (
++	"strings"
++	"unicode/utf8"
++
+ 	"rustdesk-api-server-pro/app/model"
+ 	"rustdesk-api-server-pro/config"
+ 	"rustdesk-api-server-pro/db"
+@@ -16,6 +19,9 @@ type DevicesController struct {
+ 
+ func (c *DevicesController) BeforeActivation(b mvc.BeforeActivation) {
+ 	b.Handle("GET", "/devices/list", "HandleList")
++	// CadenaTech: empresa, apelido e observacao do computador
++	b.Handle("POST", "/devices/edit", "HandleEditar")
++	b.Handle("POST", "/devices/company", "HandleMoverEmpresa")
+ }
+ 
+ func (c *DevicesController) HandleList() mvc.Result {
+@@ -24,11 +30,14 @@ func (c *DevicesController) HandleList() mvc.Result {
+ 	hostname := c.Ctx.URLParamDefault("hostname", "")
+ 	username := c.Ctx.URLParamDefault("username", "")
+ 	rustdesk_id := c.Ctx.URLParamDefault("rustdesk_id", "")
++	// CadenaTech: empresa_id vazio = todas, 0 = sem empresa
++	empresaId := c.Ctx.URLParamTrim("empresa_id")
+ 	query := func() *xorm.Session {
+ 		q := c.Db.Table(&model.Device{})
+ 
+ 		if hostname != "" {
+-			q.Where("hostname LIKE ?", "%"+hostname+"%")
++			// CadenaTech: o campo do nome procura tambem no apelido e na observacao
++			q.Where("(hostname LIKE ? or apelido LIKE ? or observacao LIKE ?)", "%"+hostname+"%", "%"+hostname+"%", "%"+hostname+"%")
+ 		}
+ 		if username != "" {
+ 			q.Where("username LIKE ?", "%"+username+"%")
+@@ -36,6 +45,13 @@ func (c *DevicesController) HandleList() mvc.Result {
+ 		if rustdesk_id != "" {
+ 			q.Where("rustdesk_id LIKE ?", "%"+rustdesk_id+"%")
+ 		}
++		if empresaId != "" {
++			if id := c.Ctx.URLParamIntDefault("empresa_id", 0); id > 0 {
++				q.Where("empresa_id = ?", id)
++			} else {
++				q.Where("(empresa_id = 0 or empresa_id IS NULL)")
++			}
++		}
+ 		q.Asc("username")
+ 		return q
+ 	}
+@@ -43,13 +59,23 @@ func (c *DevicesController) HandleList() mvc.Result {
+ 	pagination := db.NewPagination(currentPage, pageSize)
+ 	deviceList := make([]model.Device, 0)
+ 
+-	err := pagination.Paginate(query, &model.Audit{}, &deviceList)
++	err := pagination.Paginate(query, &model.Device{}, &deviceList)
+ 	if err != nil {
+ 		return c.Error(nil, err.Error())
+ 	}
+ 
++	empresas := make([]model.Empresa, 0)
++	_ = c.Db.Find(&empresas)
++	nomes := make(map[int]string, len(empresas))
++	for _, e := range empresas {
++		nomes[e.Id] = e.Nome
++	}
+ 	list := make([]iris.Map, 0)
+ 	for _, a := range deviceList {
++		empresa := a.EmpresaId
++		if _, ok := nomes[empresa]; !ok {
++			empresa = 0
++		}
+ 		list = append(list, iris.Map{
+ 			"id":          a.Id,
+ 			"rustdesk_id": a.RustdeskId,
+@@ -59,6 +85,10 @@ func (c *DevicesController) HandleList() mvc.Result {
+ 			"version":     a.Version,
+ 			"os":          a.Os,
+ 			"memory":      a.Memory,
++			"empresa_id":  empresa,
++			"empresa":     nomes[empresa],
++			"apelido":     a.Apelido,
++			"observacao":  a.Observacao,
+ 			"created_at":  a.CreatedAt.Format(config.TimeFormat),
+ 		})
+ 	}
+@@ -69,3 +99,67 @@ func (c *DevicesController) HandleList() mvc.Result {
+ 		"size":    pageSize,
+ 	}, "ok")
+ }
++
++// empresaValida confere se a empresa existe (0 = sem empresa)
++func (c *DevicesController) empresaValida(id int) bool {
++	if id == 0 {
++		return true
++	}
++	has, _ := c.Db.ID(id).Exist(&model.Empresa{})
++	return has
++}
++
++// HandleEditar grava a empresa, o apelido e a observacao de um computador
++func (c *DevicesController) HandleEditar() mvc.Result {
++	var form struct {
++		Id         int    `json:"id"`
++		EmpresaId  int    `json:"empresa_id"`
++		Apelido    string `json:"apelido"`
++		Observacao string `json:"observacao"`
++	}
++	if err := c.Ctx.ReadJSON(&form); err != nil {
++		return c.Error(nil, err.Error())
++	}
++	form.Apelido = strings.TrimSpace(form.Apelido)
++	form.Observacao = strings.TrimSpace(form.Observacao)
++	if utf8.RuneCountInString(form.Apelido) > 100 || utf8.RuneCountInString(form.Observacao) > 255 {
++		return c.Error(nil, "DeviceTextTooLong")
++	}
++	if !c.empresaValida(form.EmpresaId) {
++		return c.Error(nil, "CompanyNotFound")
++	}
++	n, err := c.Db.ID(form.Id).Cols("empresa_id", "apelido", "observacao").Update(&model.Device{
++		EmpresaId:  form.EmpresaId,
++		Apelido:    form.Apelido,
++		Observacao: form.Observacao,
++	})
++	if err != nil {
++		return c.Error(nil, err.Error())
++	}
++	if n == 0 {
++		return c.Error(nil, "DeviceNotFound")
++	}
++	return c.Success(nil, "DeviceSaved")
++}
++
++// HandleMoverEmpresa poe varios computadores numa empresa (0 = tira da empresa)
++func (c *DevicesController) HandleMoverEmpresa() mvc.Result {
++	var form struct {
++		Ids       []int `json:"ids"`
++		EmpresaId int   `json:"empresa_id"`
++	}
++	if err := c.Ctx.ReadJSON(&form); err != nil {
++		return c.Error(nil, err.Error())
++	}
++	if len(form.Ids) == 0 {
++		return c.Error(nil, "DeviceNotFound")
++	}
++	if !c.empresaValida(form.EmpresaId) {
++		return c.Error(nil, "CompanyNotFound")
++	}
++	_, err := c.Db.In("id", form.Ids).Cols("empresa_id").Update(&model.Device{EmpresaId: form.EmpresaId})
++	if err != nil {
++		return c.Error(nil, err.Error())
++	}
++	return c.Success(nil, "DeviceSaved")
++}
+diff --git a/soybean-admin/src/views/devices/index.vue b/soybean-admin/src/views/devices/index.vue
+index f4f3c2f..766aa33 100644
+--- a/soybean-admin/src/views/devices/index.vue
++++ b/soybean-admin/src/views/devices/index.vue
+@@ -1,5 +1,9 @@
+ <script setup lang="tsx">
++import { computed, onMounted, reactive, ref, watch } from 'vue';
++import { useRoute } from 'vue-router';
++import { NButton, NTag, NTooltip } from 'naive-ui';
+ import { fetchDevicesList } from '@/service/api/devices';
++import { editarDispositivo, fetchEmpresas, moverParaEmpresa, type CadenaEmpresa } from '@/service/api/cadena';
+ import { $t } from '@/locales';
+ import { useAppStore } from '@/store/modules/app';
+ import { useTable } from '@/hooks/common/table';
+@@ -7,6 +11,29 @@ import TableHeader from './components/table-header.vue';
+ import AuditBaseLogsSearch from './components/search.vue';
+ 
+ const appStore = useAppStore();
++const route = useRoute();
++
++// CadenaTech: empresas para o filtro, a coluna e a edicao (0 = sem empresa)
++const empresas = ref<CadenaEmpresa[]>([]);
++const grupoSemEmpresa = ref('Sem empresa');
++const opcoesEmpresa = computed(() => [
++  { label: `Sem empresa (grupo “${grupoSemEmpresa.value}”)`, value: 0 },
++  ...empresas.value.map(e => ({ label: e.nome, value: e.id }))
++]);
++async function carregarEmpresas() {
++  const r = await fetchEmpresas();
++  if (!r.error) {
++    empresas.value = r.data.empresas || [];
++    grupoSemEmpresa.value = r.data.grupo_sem_empresa || grupoSemEmpresa.value;
++  }
++}
++
++function empresaDaRota(): number | null {
++  const v = route.query.empresa_id;
++  if (typeof v !== 'string' || v === '') return null;
++  const n = Number.parseInt(v, 10);
++  return Number.isNaN(n) ? null : n;
++}
+ 
+ const {
+   columns,
+@@ -28,13 +55,14 @@ const {
+     // the value can not be undefined, otherwise the property in Form will not be reactive
+     hostname: null,
+     username: null,
+-    rustdesk_id: null
++    rustdesk_id: null,
++    empresa_id: empresaDaRota()
+   },
+   columns: () => [
+     {
+-      key: 'id',
+-      title: 'ID',
+-      align: 'center'
++      type: 'selection',
++      align: 'center',
++      width: 44
+     },
+     {
+       key: 'rustdesk_id',
+@@ -42,9 +70,41 @@ const {
+       align: 'center'
+     },
+     {
+-      key: 'hostname',
+-      title: $t('dataMap.device.hostname'),
+-      align: 'center'
++      key: 'apelido',
++      title: $t('dataMap.device.apelido' as App.I18n.I18nKey),
++      align: 'left',
++      minWidth: 160,
++      render: row =>
++        row.apelido ? (
++          <div class="flex-col">
++            <span class="font-500">{row.apelido}</span>
++            <span class="text-12px opacity-60">{row.hostname}</span>
++          </div>
++        ) : (
++          row.hostname
++        )
++    },
++    {
++      key: 'empresa',
++      title: $t('dataMap.device.empresa' as App.I18n.I18nKey),
++      align: 'left',
++      minWidth: 150,
++      render: row =>
++        row.empresa ? (
++          <NTag size="small" type="info" bordered={false}>
++            {row.empresa}
++          </NTag>
++        ) : (
++          <span class="opacity-50">—</span>
++        )
++    },
++    {
++      key: 'observacao',
++      title: $t('dataMap.device.observacao' as App.I18n.I18nKey),
++      align: 'left',
++      minWidth: 160,
++      ellipsis: { tooltip: true },
++      render: row => row.observacao || <span class="opacity-50">—</span>
+     },
+     {
+       key: 'username',
+@@ -70,25 +130,125 @@ const {
+       key: 'created_at',
+       title: $t('dataMap.audit.created_at'),
+       align: 'center'
++    },
++    {
++      key: 'operate',
++      title: $t('common.action'),
++      align: 'center',
++      width: 90,
++      fixed: 'right',
++      render: row => (
++        <NButton size="small" type="success" onClick={() => abrirEdicao(row)}>
++          {$t('common.edit')}
++        </NButton>
++      )
+     }
+   ]
+ });
++
++// Edicao de um computador
++const modal = ref(false);
++const salvando = ref(false);
++const form = reactive({ id: 0, rustdesk_id: '', hostname: '', empresa_id: 0, apelido: '', observacao: '' });
++function abrirEdicao(row: Api.Devices.Device) {
++  Object.assign(form, {
++    id: row.id,
++    rustdesk_id: row.rustdesk_id,
++    hostname: row.hostname,
++    empresa_id: row.empresa_id || 0,
++    apelido: row.apelido || '',
++    observacao: row.observacao || ''
++  });
++  modal.value = true;
++}
++async function salvar() {
++  salvando.value = true;
++  const res = await editarDispositivo({
++    id: form.id,
++    empresa_id: form.empresa_id || 0,
++    apelido: form.apelido,
++    observacao: form.observacao
++  });
++  salvando.value = false;
++  if (!res.error) {
++    window.$message?.success($t('api.DeviceSaved' as App.I18n.I18nKey));
++    modal.value = false;
++    await getData();
++  }
++}
++
++// Varios computadores de uma vez para uma empresa
++const selecionados = ref<number[]>([]);
++const empresaLote = ref<number | null>(null);
++const movendo = ref(false);
++async function moverSelecionados() {
++  if (empresaLote.value === null || selecionados.value.length === 0) return;
++  movendo.value = true;
++  const res = await moverParaEmpresa(selecionados.value, empresaLote.value);
++  movendo.value = false;
++  if (!res.error) {
++    window.$message?.success($t('api.DeviceSaved' as App.I18n.I18nKey));
++    selecionados.value = [];
++    empresaLote.value = null;
++    await getData();
++  }
++}
++
++// Vindo da tela Empresas (?empresa_id=), filtra por ela
++watch(
++  () => route.query.empresa_id,
++  () => {
++    if (route.name !== 'devices') return;
++    searchParams.empresa_id = empresaDaRota();
++    getDataByPage();
++  }
++);
++
++onMounted(carregarEmpresas);
+ </script>
+ 
+ <template>
+   <div class="min-h-500px flex-col-stretch gap-16px overflow-hidden lt-sm:overflow-auto">
+-    <AuditBaseLogsSearch v-model:model="searchParams" @reset="resetSearchParams" @search="getDataByPage" />
++    <AuditBaseLogsSearch
++      v-model:model="searchParams"
++      :empresas="opcoesEmpresa"
++      @reset="resetSearchParams"
++      @search="getDataByPage"
++    />
+ 
+     <NCard :title="$t('route.devices')" :bordered="false" size="small" class="sm:flex-1-hidden card-wrapper">
+       <template #header-extra>
+         <TableHeader v-model:columns="columnChecks" :loading="loading" @refresh="getData" />
+       </template>
++      <!-- CadenaTech: com computadores marcados, a faixa para mover todos de uma vez para uma empresa -->
++      <div
++        v-if="selecionados.length > 0"
++        class="mb-12px flex flex-wrap items-center gap-8px rd-6px bg-primary-50 px-12px py-8px dark:bg-primary-900"
++      >
++        <span class="text-13px">
++          {{ selecionados.length }} {{ selecionados.length === 1 ? 'computador marcado' : 'computadores marcados' }}:
++          mover para
++        </span>
++        <NSelect
++          v-model:value="empresaLote"
++          size="small"
++          class="w-240px"
++          placeholder="Empresa"
++          filterable
++          :options="opcoesEmpresa"
++        />
++        <NButton size="small" type="primary" :disabled="empresaLote === null" :loading="movendo" @click="moverSelecionados">
++          Mover
++        </NButton>
++        <NButton size="small" quaternary @click="selecionados = []">Desmarcar</NButton>
++      </div>
+       <NDataTable
++        v-model:checked-row-keys="selecionados"
+         :columns="columns"
+         :data="data"
+         size="small"
+         :flex-height="!appStore.isMobile"
+-        :scroll-x="962"
++        :scroll-x="1300"
+         :loading="loading"
+         remote
+         :row-key="row => row.id"
+@@ -96,6 +256,37 @@ const {
+         class="sm:h-full"
+       />
+     </NCard>
++
++    <NModal v-model:show="modal" preset="card" title="Editar dispositivo" class="w-520px">
++      <p class="pb-12px text-13px opacity-80">{{ form.hostname }} · ID {{ form.rustdesk_id }}</p>
++      <NForm label-placement="top">
++        <NFormItem :label="$t('dataMap.device.empresa' as App.I18n.I18nKey)">
++          <NSelect v-model:value="form.empresa_id" filterable :options="opcoesEmpresa" />
++        </NFormItem>
++        <NFormItem :label="$t('dataMap.device.apelido' as App.I18n.I18nKey)">
++          <NInput
++            v-model:value="form.apelido"
++            maxlength="100"
++            placeholder="ex.: Caixa 1 (no Técnico, aparece no lugar do nome do computador)"
++          />
++        </NFormItem>
++        <NFormItem :label="$t('dataMap.device.observacao' as App.I18n.I18nKey)">
++          <NInput
++            v-model:value="form.observacao"
++            type="textarea"
++            :autosize="{ minRows: 2, maxRows: 4 }"
++            maxlength="255"
++            placeholder="opcional; a busca do Técnico também procura aqui"
++          />
++        </NFormItem>
++      </NForm>
++      <template #footer>
++        <NSpace justify="end">
++          <NButton @click="modal = false">{{ $t('common.cancel') }}</NButton>
++          <NButton type="primary" :loading="salvando" @click="salvar">{{ $t('common.confirm') }}</NButton>
++        </NSpace>
++      </template>
++    </NModal>
+   </div>
+ </template>
+ 
+diff --git a/soybean-admin/src/views/devices/components/search.vue b/soybean-admin/src/views/devices/components/search.vue
+index 92fe8ef..f66bbaa 100644
+--- a/soybean-admin/src/views/devices/components/search.vue
++++ b/soybean-admin/src/views/devices/components/search.vue
+@@ -6,6 +6,13 @@ defineOptions({
+   name: 'AuditBaseLogsSearch'
+ });
+ 
++interface Props {
++  // CadenaTech: opcoes do filtro de empresa (0 = sem empresa)
++  empresas?: { label: string; value: number }[];
++}
++
++withDefaults(defineProps<Props>(), { empresas: () => [] });
++
+ interface Emits {
+   (e: 'reset'): void;
+   (e: 'search'): void;
+@@ -28,12 +35,22 @@ async function search() {
+ 
+ <template>
+   <NCard :bordered="false" size="small" class="card-wrapper">
+-    <NCollapse>
++    <NCollapse :default-expanded-names="model.empresa_id !== null && model.empresa_id !== undefined ? ['user-search'] : []">
+       <NCollapseItem :title="$t('common.search')" name="user-search">
+         <NForm ref="formRef" :model="model" label-placement="left" :label-width="80">
+           <NGrid responsive="screen" item-responsive>
++            <NFormItemGi span="24 s:12 m:6" :label="$t('dataMap.device.empresa' as App.I18n.I18nKey)" path="empresa_id">
++              <NSelect
++                v-model:value="model.empresa_id"
++                clearable
++                filterable
++                placeholder="Todas"
++                :options="empresas"
++                @update:value="search"
++              />
++            </NFormItemGi>
+             <NFormItemGi span="24 s:12 m:6" :label="$t('dataMap.device.hostname')" path="hostname">
+-              <NInput v-model:value="model.hostname" />
++              <NInput v-model:value="model.hostname" placeholder="nome, apelido ou observação" />
+             </NFormItemGi>
+             <NFormItemGi span="24 s:12 m:6" :label="$t('dataMap.device.username')" path="username">
+               <NInput v-model:value="model.username" />
+@@ -42,7 +59,7 @@ async function search() {
+               <NInput v-model:value="model.rustdesk_id" />
+             </NFormItemGi>
+ 
+-            <NFormItemGi span="24 m:12">
++            <NFormItemGi span="24">
+               <NSpace class="w-full" justify="end">
+                 <NButton @click="reset">
+                   <template #icon>

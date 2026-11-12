@@ -181,8 +181,14 @@ extension _CadenaCartao on _PeerCardState {
                     style: const TextStyle(
                         fontSize: 15, fontWeight: FontWeight.w700)),
               ).paddingOnly(left: 3, right: 3, top: 5),
-              infoLinha(Icons.person_outline,
-                      peer.username.isNotEmpty ? peer.username : '—')
+              // Com apelido (definido no painel), o nome do computador vai junto do usuario
+              infoLinha(
+                      Icons.person_outline,
+                      [
+                        peer.username.isNotEmpty ? peer.username : '—',
+                        if (peer.alias.isNotEmpty && peer.hostname.isNotEmpty)
+                          peer.hostname,
+                      ].join(' · '))
                   .paddingSymmetric(horizontal: 3),
               infoLinha(Icons.badge_outlined, formatID(peer.id), destaque: true)
                   .paddingSymmetric(horizontal: 3),

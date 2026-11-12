@@ -24,7 +24,7 @@ jobsConfig:
   deviceCheckJob:
     duration: 30
 cadena:
-  grupoClientes: "Clientes"   # nome do grupo da aba "Grupo" do Tecnico
+  grupoClientes: "Sem empresa" # grupo da aba Clientes do Tecnico com os computadores ainda sem empresa
   pastasGravacoes:            # onde o FTP recebe as gravacoes do Tecnico (botao Assistir do Registro de acessos)
     - 'D:\ftp\gravacoes'
   diasRegistros: 0            # apaga acessos, transferencias e alertas com mais de N dias (0 = nunca)

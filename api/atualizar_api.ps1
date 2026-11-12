@@ -1,6 +1,6 @@
 ﻿# API e painel (rustdesk-api-server-pro, de lantongxue, AGPL-3.0) com os recursos do CadenaTech (cadena-api.patch):
-#   - aba "Grupo" do Tecnico com todos os computadores dos clientes, num grupo de nome configuravel
-#   - catalogos de enderecos compartilhados, com permissao por tecnico (painel: Catalogos)
+#   - aba Clientes do Tecnico com todos os computadores dos clientes, agrupados por empresa, com apelido e
+#     observacao (painel: Empresas e Dispositivos); os sem empresa ficam num grupo de nome configuravel
 #   - acessos em andamento (painel: Acessos agora) e correcao do fechamento de conexoes na auditoria
 #   - bloqueio de login depois de 5 senhas erradas em 15 minutos (por usuario + IP)
 #   - PostgreSQL (alem de SQLite e MySQL), DSN e signKey por .env ou variavel de ambiente, comando migrate-db

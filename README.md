@@ -13,7 +13,7 @@ O repositório **não traz uma cópia do RustDesk**. Os scripts baixam o código
 **Dois programas para Windows e Android**, gerados do mesmo código:
 
 - **Cadena Suporte** (Cliente), instalado no computador atendido. Só recebe acesso. Cada conexão abre uma janela de aprovação com um aviso contra golpes; o Android mostra o mesmo aviso.
-- **Cadena Técnico**, para quem atende. Só acessa e exige login na conta da API. A tela inicial tem uma lateral com Clientes, Recentes, Favoritos e Catálogos, a conta e o status dos servidores, e cartões por computador (sistema, online, favorito, Conectar); em janela estreita a lateral fica só com os ícones. Clientes lista os computadores dos clientes. Cada acesso é gravado, e as gravações podem ir sozinhas para um servidor FTP (Configurações > Geral, com endereço para a rede local e para fora).
+- **Cadena Técnico**, para quem atende. Só acessa e exige login na conta da API. A tela inicial tem uma lateral com Clientes, Recentes e Favoritos, a conta e o status dos servidores, e cartões por computador (sistema, online, favorito, Conectar); em janela estreita a lateral fica só com os ícones. Clientes lista os computadores dos clientes, separados por empresa, com o apelido e a observação definidos no painel. Cada acesso é gravado, e as gravações podem ir sozinhas para um servidor FTP (Configurações > Geral, com endereço para a rede local e para fora).
 
 **Servidor próprio, com reserva automática.** O servidor e a chave vão embutidos e travados no programa. Um segundo servidor é opcional:
 
@@ -26,7 +26,7 @@ O repositório **não traz uma cópia do RustDesk**. Os scripts baixam o código
 **API e painel web**, a partir do [rustdesk-api-server-pro](https://github.com/lantongxue/rustdesk-api-server-pro) com recursos a mais:
 
 - tradução pt-BR e identidade da marca;
-- catálogos de endereços compartilhados, com permissão por técnico;
+- empresas: cada computador ganha empresa, apelido e observação (telas Empresas e Dispositivos), e o Técnico mostra os computadores agrupados por empresa; a mensagem do WhatsApp (webhook) leva a empresa e o apelido;
 - tela de acessos em andamento;
 - registro de acessos com técnico, hora final e as gravações enviadas por FTP (botão Assistir, em `pastasGravacoes`);
 - derrubar um acesso pelo painel (Acessos agora > Desconectar), alertas de segurança enviados pelos Clientes e limpeza automática de registros e gravações (`diasRegistros`, `diasGravacoes`);

@@ -171,7 +171,7 @@ const local: App.I18n.Schema = {
     audit_alarms: 'Alertas de segurança',
     audit_console: 'Ações no painel',
     devices: 'Dispositivos',
-    catalogs: 'Catálogos compartilhados',
+    catalogs: 'Empresas',
     connections: 'Acessos agora'
   },
   page: {
@@ -303,7 +303,10 @@ const local: App.I18n.Schema = {
       version: 'Versão',
       memory: 'Memória',
       os: 'Sistema',
-      rustdesk_id: 'ID'
+      rustdesk_id: 'ID',
+      empresa: 'Empresa',
+      apelido: 'Apelido',
+      observacao: 'Observação'
     },
     audit: {
       username: 'Usuário',
@@ -375,11 +378,14 @@ const local: App.I18n.Schema = {
     VerificationCodeError: 'Código de verificação incorreto',
     UUIDEmpty: 'Informe o UUID',
     LoginBlocked: 'Muitas tentativas de login. Tente de novo em 15 minutos.',
-    CatalogNameEmpty: 'Informe o nome do catálogo',
-    CatalogRuleInvalid: 'Permissão inválida',
-    CatalogNotFound: 'Catálogo não encontrado',
-    CatalogSaved: 'Catálogo salvo',
-    CatalogDeleted: 'Catálogo excluído',
+    CompanyNameEmpty: 'Informe o nome da empresa',
+    CompanyNameDuplicate: 'Já existe uma empresa (ou o grupo dos computadores sem empresa) com esse nome',
+    CompanyNotFound: 'Empresa não encontrada',
+    CompanySaved: 'Empresa salva',
+    CompanyDeleted: 'Empresa excluída',
+    DeviceNotFound: 'Dispositivo não encontrado',
+    DeviceSaved: 'Dispositivo salvo',
+    DeviceTextTooLong: 'Texto longo demais (nome e apelido até 100 caracteres, observação até 255)',
     ConnectionNotFound: 'Acesso não encontrado ou já encerrado',
     DisconnectRequested: 'Pedido de desconexão enviado',
     TfaRequired: 'Informe o código de 6 dígitos do autenticador (2FA) e o código da imagem de novo',
