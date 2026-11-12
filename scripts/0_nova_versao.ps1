@@ -8,12 +8,13 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\0_nova_versao.ps1            -> so monta
 #   powershell -ExecutionPolicy Bypass -File scripts\0_nova_versao.ps1 -Publicar  -> monta e publica
 #   -Config <arquivo>  usa outra configuracao local (o mesmo que CADENA_CONFIG)
+#   -SemX86            pula o Cliente de 32 bits (a release sai so com o x64)
 #   -SemAndroid        pula o Android (a release leva os APKs que ja existirem da mesma versao do RustDesk)
 #   -Reserva           compila com o servidor 2 como principal, se o 1 cair. Para voltar, rode de novo sem
 #                      -Reserva. Nos dois casos as maquinas instaladas mudam pela atualizacao automatica
 #   -Versao x.y.z      versao publica (SemVer) da release e dos arquivos (suporte-vx.y.z-client-x64.exe). Sem ela, sobe
 #                      o ultimo numero da anterior (1.0.0 -> 1.0.1); a primeira e 1.0.0
-param([switch]$Publicar, [switch]$SemAndroid, [switch]$Reserva, [string]$Config, [string]$Versao)
+param([switch]$Publicar, [switch]$SemAndroid, [switch]$SemX86, [switch]$Reserva, [string]$Config, [string]$Versao)
 $ErrorActionPreference = 'Stop'
 if ($Config) { $env:CADENA_CONFIG = (Resolve-Path $Config).Path }
 $env:CADENA_RESERVA = if ($Reserva) { '1' } else { $null }
@@ -55,6 +56,15 @@ if (-not $SemAndroid) {
   )
   & wsl.exe -d $DistroWsl -u root -- env @Variaveis bash "$(Wsl $PSScriptRoot)/android/compilar_todos.sh"
   if ($LASTEXITCODE -ne 0) { throw "Android saiu com $LASTEXITCODE" }
+}
+
+if (-not $SemX86) {
+  # Cliente de 32 bits (Sciter), por ultimo: muda o toolchain e as pastas de build so deste processo
+  "##### Windows 32 bits (Cliente x86)"
+  if (-not (Test-Path "$Raiz\ferramentas\llvm32\bin\libclang.dll") -or -not (Test-Path "$Raiz\ferramentas\vcpkg-x86\installed\x86-windows-static\lib\vpx.lib")) {
+    & "$PSScriptRoot\x86_ferramentas.ps1"
+  }
+  & "$PSScriptRoot\x86_compilar.ps1"
 }
 
 "##### Release"

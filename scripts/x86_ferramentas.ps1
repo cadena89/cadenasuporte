@@ -30,6 +30,9 @@ if (-not (& rustup toolchain list | Select-String -SimpleMatch $ToolchainX86 -Qu
 "=== vcpkg x86-windows-static"
 Set-Location "$Raiz\rustdesk"
 $env:VCPKG_DEFAULT_HOST_TRIPLET = 'x86-windows-static'
-& "$env:VCPKG_ROOT\vcpkg.exe" install --triplet x86-windows-static "--x-install-root=$env:VCPKG_ROOT\installed"
+# Raiz propria (<ferramentas>\vcpkg-x86\installed): no modo manifesto o vcpkg apaga da pasta de instalacao o que
+# nao e do triplet pedido, e no mesmo lugar sumiria o x64. O hwcodec e o opus procuram em VCPKG_ROOT\installed,
+# por isso o x86_compilar aponta o VCPKG_ROOT para <ferramentas>\vcpkg-x86
+& "$env:VCPKG_ROOT\vcpkg.exe" install --triplet x86-windows-static "--x-install-root=$Ferramentas\vcpkg-x86\installed"
 if ($LASTEXITCODE -ne 0) { throw "vcpkg x86 saiu com $LASTEXITCODE" }
 "=== Concluido"

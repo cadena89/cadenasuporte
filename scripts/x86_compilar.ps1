@@ -12,6 +12,9 @@ $ReleaseX86 = "$Raiz\release-x86"
 $env:RUSTUP_TOOLCHAIN = $ToolchainX86
 $env:CARGO_TARGET_DIR = "$Raiz\target-x86"
 $env:VCPKG_DEFAULT_HOST_TRIPLET = 'x86-windows-static'
+# Bibliotecas de 32 bits na raiz propria do x86_ferramentas (separada da do x64)
+$env:VCPKG_ROOT = "$Ferramentas\vcpkg-x86"
+if (-not (Test-Path "$env:VCPKG_ROOT\installed\x86-windows-static\lib\vpx.lib")) { throw 'Rode antes o x86_ferramentas.ps1' }
 $env:LIBCLANG_PATH = "$Ferramentas\llvm32\bin"
 $env:PATH = "$Ferramentas\llvm32\bin;$env:PATH"
 $env:CADENA_PERFIL = $null
