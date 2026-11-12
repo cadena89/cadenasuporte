@@ -1,0 +1,67 @@
+{
+  "name": "Suporte - notificacoes de acesso no WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cadena-suporte",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "name": "Evento da API do suporte",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "5d0f6a3e-2b7c-4a51-9c1e-0c4de0a00001"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.headers['x-cadena-token'] }}",
+              "value2": "TROQUE_PELO_RUSTDESK_API_WEBHOOK_TOKEN"
+            }
+          ]
+        }
+      },
+      "name": "Token confere",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8081/message/sendText/TROQUE_PELA_INSTANCIA",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "TROQUE_PELA_APIKEY_DA_EVOLUTION"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: '5541999999999', text: $json.body.mensagem }) }}",
+        "options": {}
+      },
+      "name": "Enviar no WhatsApp (Evolution)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, -80]
+    }
+  ],
+  "connections": {
+    "Evento da API do suporte": {
+      "main": [[{ "node": "Token confere", "type": "main", "index": 0 }]]
+    },
+    "Token confere": {
+      "main": [[{ "node": "Enviar no WhatsApp (Evolution)", "type": "main", "index": 0 }], []]
+    }
+  },
+  "settings": {},
+  "active": false
+}

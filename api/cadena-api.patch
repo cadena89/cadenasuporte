@@ -909,37 +909,104 @@ index d3e61d8..4778221 100644
  		},
  	}
 diff --git a/backend/app/controller/api/audit.go b/backend/app/controller/api/audit.go
-index 70d3fe1..05f2eeb 100644
+index 70d3fe1..01eb1ad 100644
 --- a/backend/app/controller/api/audit.go
 +++ b/backend/app/controller/api/audit.go
-@@ -3,6 +3,7 @@ package api
+@@ -3,6 +3,8 @@ package api
  import (
  	"io"
  	"rustdesk-api-server-pro/app/model"
++	"rustdesk-api-server-pro/app/webhook"
 +	"strings"
  	"time"
  
  	"github.com/kataras/iris/v12"
-@@ -64,7 +65,8 @@ func (c *AuditController) PostAuditConn() mvc.Result {
+@@ -64,9 +66,29 @@ func (c *AuditController) PostAuditConn() mvc.Result {
  			})
  		}
  		if action == "close" {
 -			c.Db.Where("conn_id = ?", connId).Update(&model.Audit{
+-				ClosedAt: time.Now(),
 +			// CadenaTech: o conn_id recomeca a cada servico; o fechamento vale so para a conexao aberta deste computador
++			aberta := &model.Audit{}
++			achou, _ := c.Db.Where("conn_id = ? and rustdesk_id = ? and (closed_at IS NULL or closed_at < ?)", connId, rustdeskId, "1971-01-01").Desc("id").Get(aberta)
++			agora := time.Now()
 +			c.Db.Where("conn_id = ? and rustdesk_id = ? and (closed_at IS NULL or closed_at < ?)", connId, rustdeskId, "1971-01-01").Update(&model.Audit{
- 				ClosedAt: time.Now(),
++				ClosedAt: agora,
  			})
++			// CadenaTech: webhook (N8N/WhatsApp), so para acesso que chegou a ter tecnico (o "peer"); tentativas
++			// recusadas nao viram notificacao
++			if achou && aberta.Peer != "" {
++				duracao := agora.Sub(aberta.CreatedAt)
++				webhook.Enviar(webhook.Evento{
++					Evento:          webhook.AcessoEncerrado,
++					ClienteId:       rustdeskId,
++					TecnicoId:       gjson.Get(aberta.Peer, "0").String(),
++					TecnicoNome:     gjson.Get(aberta.Peer, "1").String(),
++					Tipo:            webhook.TipoConexao(aberta.Type),
++					Origem:          aberta.IP,
++					ConnId:          connId,
++					DuracaoSegundos: int64(duracao.Seconds()),
++					Duracao:         webhook.FormatarDuracao(duracao),
++				})
++			}
  		}
-@@ -76,7 +78,7 @@ func (c *AuditController) PostAuditConn() mvc.Result {
+ 		return mvc.Response{}
+ 	}
+@@ -76,11 +98,30 @@ func (c *AuditController) PostAuditConn() mvc.Result {
  		t := gjson.GetBytes(body, "type").Int()
  		_type := int(t)
  		peer := peerResult.String()
 -		c.Db.Where("conn_id = ?", connId).Update(&model.Audit{
++		aberta := &model.Audit{}
++		achou, _ := c.Db.Where("conn_id = ? and rustdesk_id = ? and (closed_at IS NULL or closed_at < ?)", connId, rustdeskId, "1971-01-01").Desc("id").Get(aberta)
 +		c.Db.Where("conn_id = ? and rustdesk_id = ? and (closed_at IS NULL or closed_at < ?)", connId, rustdeskId, "1971-01-01").Update(&model.Audit{
  			SessionId: sessionId,
  			Type:      _type,
  			Peer:      peer,
-@@ -117,10 +119,28 @@ func (c *AuditController) PostAuditFile() mvc.Result {
+ 		})
++		// CadenaTech: webhook (N8N/WhatsApp). O "peer" chega uma vez, quando o tecnico ja entrou; se repetir para a
++		// mesma conexao (mesmo tecnico), nao notifica de novo
++		if !achou || aberta.Peer != peer {
++			ip := ""
++			if achou {
++				ip = aberta.IP
++			}
++			webhook.Enviar(webhook.Evento{
++				Evento:      webhook.AcessoIniciado,
++				ClienteId:   rustdeskId,
++				TecnicoId:   gjson.Get(peer, "0").String(),
++				TecnicoNome: gjson.Get(peer, "1").String(),
++				Tipo:        webhook.TipoConexao(_type),
++				Origem:      ip,
++				ConnId:      connId,
++			})
++		}
+ 	}
+ 
+ 	return mvc.Response{}
+@@ -113,14 +154,59 @@ func (c *AuditController) PostAuditFile() mvc.Result {
+ 		Uuid:       gjson.GetBytes(body, "type").String(),
+ 	})
+ 
++	// CadenaTech: webhook (N8N/WhatsApp). type 0 = do controlado (cliente) para o controlador (tecnico), 1 = o contrario
++	info := gjson.GetBytes(body, "info").String()
++	direcao := "cliente_para_tecnico"
++	if gjson.GetBytes(body, "type").Int() == 1 {
++		direcao = "tecnico_para_cliente"
++	}
++	webhook.Enviar(webhook.Evento{
++		Evento:      webhook.TransferenciaArquivo,
++		ClienteId:   gjson.GetBytes(body, "id").String(),
++		TecnicoId:   gjson.GetBytes(body, "peer_id").String(),
++		TecnicoNome: gjson.Get(info, "name").String(),
++		Origem:      strings.TrimPrefix(gjson.Get(info, "ip").String(), "::ffff:"),
++		Direcao:     direcao,
++		Caminho:     gjson.GetBytes(body, "path").String(),
++		Arquivos:    int(gjson.Get(info, "num").Int()),
++	})
++
+ 	return mvc.Response{}
  }
  
  func (c *AuditController) PostAuditAlarm() mvc.Result {
@@ -970,6 +1037,16 @@ index 70d3fe1..05f2eeb 100644
 +		IP:         ip,
 +		ConnId:     int(gjson.GetBytes(body, "conn_id").Int()),
 +		Info:       info,
++	})
++	// CadenaTech: webhook (N8N/WhatsApp)
++	typ := int(gjson.GetBytes(body, "typ").Int())
++	webhook.Enviar(webhook.Evento{
++		Evento:     webhook.AlertaSeguranca,
++		ClienteId:  gjson.GetBytes(body, "id").String(),
++		Origem:     ip,
++		ConnId:     int(gjson.GetBytes(body, "conn_id").Int()),
++		AlertaTipo: &typ,
++		Alerta:     webhook.DescricaoAlerta(typ),
 +	})
 +	return mvc.Response{}
  }
@@ -1218,7 +1295,7 @@ index 8241a1d..f646b87 100644
  	}
  
 diff --git a/backend/app/jobs.go b/backend/app/jobs.go
-index a891945..73467c4 100644
+index a891945..784461b 100644
 --- a/backend/app/jobs.go
 +++ b/backend/app/jobs.go
 @@ -1,6 +1,8 @@
@@ -1230,7 +1307,7 @@ index a891945..73467c4 100644
  	"rustdesk-api-server-pro/app/model"
  	"rustdesk-api-server-pro/config"
  	"rustdesk-api-server-pro/db"
-@@ -26,10 +28,32 @@ func StartJobs(cfg *config.ServerConfig) {
+@@ -26,10 +28,33 @@ func StartJobs(cfg *config.ServerConfig) {
  	}
  	s.NewJob(gocron.DurationJob(time.Duration(cfg.JobsConfig.DeviceCheckJob.Duration)*time.Second), gocron.NewTask(func() {
  		expired := carbon.Now(cfg.Db.TimeZone).SubSeconds(30).ToDateTimeString()
@@ -1250,9 +1327,10 @@ index a891945..73467c4 100644
 +			f, _ := dbEngine.Where("created_at < ?", corte).Delete(&model.FileTransfer{})
 +			l, _ := dbEngine.Where("created_at < ?", corte).Delete(&model.Alarm{})
 +			p, _ := dbEngine.Where("created_at < ?", corte).Delete(&model.ConsoleAudit{})
-+			if a+f+l+p > 0 {
-+				log.Printf("limpeza: %d acessos, %d transferencias, %d alertas e %d acoes do painel com mais de %d dias",
-+					a, f, l, p, registros)
++			w, _ := dbEngine.Where("created_at < ?", corte).Delete(&model.WebhookEnvio{})
++			if a+f+l+p+w > 0 {
++				log.Printf("limpeza: %d acessos, %d transferencias, %d alertas, %d acoes do painel e %d envios do webhook com mais de %d dias",
++					a, f, l, p, w, registros)
 +			}
 +		}
 +		if dias > 0 {
@@ -1486,10 +1564,10 @@ index cd8b90a..64ad1f7 100644
  
 diff --git a/backend/cmd/migrar.go b/backend/cmd/migrar.go
 new file mode 100644
-index 0000000..cb945aa
+index 0000000..f2544d5
 --- /dev/null
 +++ b/backend/cmd/migrar.go
-@@ -0,0 +1,158 @@
+@@ -0,0 +1,159 @@
 +package cmd
 +
 +// CadenaTech: copia todos os dados de um banco para outro (ex.: SQLite -> PostgreSQL), mantendo ids e datas.
@@ -1532,6 +1610,7 @@ index 0000000..cb945aa
 +		new(model.MailTemplate),
 +		new(model.Alarm),        // CadenaTech: alertas de seguranca
 +		new(model.ConsoleAudit), // CadenaTech: acoes do painel
++		new(model.WebhookEnvio), // CadenaTech: envios do webhook de eventos (N8N)
 +	}
 +}
 +
@@ -1685,10 +1764,10 @@ index 3adc23a..dcf57ca 100644
  			fmt.Println("Db init error:", err)
 diff --git a/backend/config/cadena.go b/backend/config/cadena.go
 new file mode 100644
-index 0000000..1e8db07
+index 0000000..7e807f2
 --- /dev/null
 +++ b/backend/config/cadena.go
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,201 @@
 +package config
 +
 +// CadenaTech: opcoes proprias e configuracao por variaveis de ambiente.
@@ -1702,6 +1781,10 @@ index 0000000..1e8db07
 +//   RUSTDESK_API_PASTAS_GRAVACOES  pastas das gravacoes enviadas por FTP, separadas por ";"
 +//   RUSTDESK_API_DIAS_REGISTROS    dias de guarda de acessos, transferencias e alertas (0 = sempre)
 +//   RUSTDESK_API_DIAS_GRAVACOES    dias de guarda das gravacoes (0 = sempre)
++//   RUSTDESK_API_WEBHOOK_URL       URL que recebe os eventos de acesso (POST JSON), ex.: webhook do N8N. Vazio = desligado
++//   RUSTDESK_API_WEBHOOK_TOKEN     enviado no cabecalho X-Cadena-Token, para o N8N conferir a origem (opcional)
++//   RUSTDESK_API_WEBHOOK_EVENTOS   eventos enviados, separados por virgula (padrao: todos): acesso_iniciado,
++//                                  acesso_encerrado, alerta_seguranca, transferencia_arquivo
 +
 +import (
 +	"bufio"
@@ -1721,6 +1804,34 @@ index 0000000..1e8db07
 +	// dias. 0 (padrao) guarda para sempre
 +	DiasRegistros int `yaml:"diasRegistros"`
 +	DiasGravacoes int `yaml:"diasGravacoes"`
++	// Webhook dos eventos de acesso (app/webhook): URL (vazia = desligado), token opcional e eventos (vazio = todos)
++	WebhookUrl     string   `yaml:"webhookUrl"`
++	WebhookToken   string   `yaml:"webhookToken"`
++	WebhookEventos []string `yaml:"webhookEventos"`
++}
++
++var (
++	webhookOnce    sync.Once
++	webhookUrl     string
++	webhookToken   string
++	webhookEventos []string
++)
++
++// Webhook devolve a URL, o token e os eventos do webhook (eventos vazio = todos; URL vazia = desligado).
++// Lido uma vez (o GetServerConfig rele o server.yaml a cada chamada): mudou o .env, reinicie a API
++func Webhook() (url, token string, eventos []string) {
++	webhookOnce.Do(func() {
++		if cfg := GetServerConfig(); cfg.Cadena != nil {
++			for _, e := range cfg.Cadena.WebhookEventos {
++				if e = strings.TrimSpace(e); e != "" {
++					webhookEventos = append(webhookEventos, e)
++				}
++			}
++			webhookUrl = strings.TrimSpace(cfg.Cadena.WebhookUrl)
++			webhookToken = strings.TrimSpace(cfg.Cadena.WebhookToken)
++		}
++	})
++	return webhookUrl, webhookToken, webhookEventos
 +}
 +
 +// DiasRetencao devolve os dias de guarda dos registros e das gravacoes (0 = sem limpeza)
@@ -1807,6 +1918,18 @@ index 0000000..1e8db07
 +			cfg.Cadena = &CadenaConfig{}
 +		}
 +		cfg.Cadena.PastasGravacoes = strings.Split(v, ";")
++	}
++	for chave, destino := range map[string]func(*CadenaConfig, string){
++		"RUSTDESK_API_WEBHOOK_URL":     func(c *CadenaConfig, v string) { c.WebhookUrl = v },
++		"RUSTDESK_API_WEBHOOK_TOKEN":   func(c *CadenaConfig, v string) { c.WebhookToken = v },
++		"RUSTDESK_API_WEBHOOK_EVENTOS": func(c *CadenaConfig, v string) { c.WebhookEventos = strings.Split(v, ",") },
++	} {
++		if v := strings.TrimSpace(os.Getenv(chave)); v != "" {
++			if cfg.Cadena == nil {
++				cfg.Cadena = &CadenaConfig{}
++			}
++			destino(cfg.Cadena, v)
++		}
 +	}
 +	for chave, destino := range map[string]func(*CadenaConfig, int){
 +		"RUSTDESK_API_DIAS_REGISTROS": func(c *CadenaConfig, n int) { c.DiasRegistros = n },
@@ -4965,3 +5088,443 @@ index fb43776..2f17031 100644
          return <NTag bordered={false}>{$t('common.yesOrNo.no')}</NTag>;
        }
      },
+diff --git a/backend/app/model/webhook_envio.go b/backend/app/model/webhook_envio.go
+new file mode 100644
+index 0000000..38fc4b8
+--- /dev/null
++++ b/backend/app/model/webhook_envio.go
+@@ -0,0 +1,21 @@
++package model
++
++import "time"
++
++// CadenaTech: cada envio do webhook de eventos (app/webhook), para conferir se a notificacao saiu.
++// Status: "enviado" ou "falhou". Limpo junto com os outros registros (cadena.diasRegistros)
++type WebhookEnvio struct {
++	Id          int       `xorm:"'id' int notnull pk autoincr"`
++	Evento      string    `xorm:"'evento' varchar(40) index"`
++	RustdeskId  string    `xorm:"'rustdesk_id' varchar(100) index"`
++	Status      string    `xorm:"'status' varchar(20)"`
++	Tentativas  int       `xorm:"'tentativas' int"`
++	CodigoHttp  int       `xorm:"'codigo_http' int"`
++	Erro        string    `xorm:"'erro' varchar(500)"`
++	Payload     string    `xorm:"'payload' text"`
++	CreatedAt   time.Time `xorm:"'created_at' datetime created index"`
++}
++
++func (m *WebhookEnvio) TableName() string {
++	return "webhook_envio"
++}
+diff --git a/backend/app/webhook/webhook.go b/backend/app/webhook/webhook.go
+new file mode 100644
+index 0000000..004d67c
+--- /dev/null
++++ b/backend/app/webhook/webhook.go
+@@ -0,0 +1,297 @@
++// Package webhook manda os eventos de acesso do RustDesk para um webhook (N8N), que os repassa ao WhatsApp
++// (Evolution API). CadenaTech.
++//
++// Os eventos saem de onde a API ja recebe as informacoes dos Clientes (controller/api/audit.go):
++//   - acesso_iniciado: o tecnico entrou (POST /api/audit/conn com o "peer");
++//   - acesso_encerrado: o acesso terminou (action "close"), com a duracao;
++//   - alerta_seguranca: alerta enviado pelo Cliente (POST /api/audit/alarm);
++//   - transferencia_arquivo: arquivo enviado ou recebido (POST /api/audit/file).
++//
++// O envio e sempre em segundo plano: a resposta ao RustDesk nao espera, e nenhuma falha do webhook (fora do ar,
++// demora, erro) chega a ele. Sao ate 3 tentativas com prazo de 10 s; o resultado fica na tabela webhook_envio.
++// Configuracao: RUSTDESK_API_WEBHOOK_URL, _TOKEN e _EVENTOS (config/cadena.go). Sem URL, nada e enviado.
++package webhook
++
++import (
++	"bytes"
++	"encoding/json"
++	"fmt"
++	"io"
++	"log"
++	"net/http"
++	"rustdesk-api-server-pro/app/model"
++	"rustdesk-api-server-pro/config"
++	"rustdesk-api-server-pro/db"
++	"strings"
++	"time"
++)
++
++const (
++	AcessoIniciado       = "acesso_iniciado"
++	AcessoEncerrado      = "acesso_encerrado"
++	AlertaSeguranca      = "alerta_seguranca"
++	TransferenciaArquivo = "transferencia_arquivo"
++)
++
++// Evento e o JSON enviado ao webhook. Mensagem traz o texto pronto em portugues para o WhatsApp; os demais campos
++// permitem montar outro texto ou filtrar no N8N
++type Evento struct {
++	Evento          string `json:"evento"`
++	Quando          string `json:"quando"` // RFC 3339, horario do servidor
++	ClienteId       string `json:"cliente_id"`
++	ClienteNome     string `json:"cliente_nome,omitempty"` // nome do computador (tabela device)
++	TecnicoId       string `json:"tecnico_id,omitempty"`
++	TecnicoNome     string `json:"tecnico_nome,omitempty"`
++	Tipo            string `json:"tipo,omitempty"`   // controle | arquivos | tunel
++	Origem          string `json:"origem,omitempty"` // IP de quem acessou
++	ConnId          int    `json:"conn_id,omitempty"`
++	DuracaoSegundos int64  `json:"duracao_segundos,omitempty"`
++	Duracao         string `json:"duracao,omitempty"`
++	AlertaTipo      *int   `json:"alerta_tipo,omitempty"`
++	Alerta          string `json:"alerta,omitempty"`
++	Direcao         string `json:"direcao,omitempty"` // cliente_para_tecnico | tecnico_para_cliente
++	Caminho         string `json:"caminho,omitempty"`
++	Arquivos        int    `json:"arquivos,omitempty"`
++	Mensagem        string `json:"mensagem"`
++}
++
++var cliente = &http.Client{Timeout: 10 * time.Second}
++
++// lerConfig devolve URL, token e eventos (config.Webhook); variavel para o teste trocar
++var lerConfig = config.Webhook
++
++// esperas entre as tentativas (a primeira e imediata). Variavel para o teste encurtar
++var esperas = []time.Duration{2 * time.Second, 10 * time.Second}
++
++// TipoConexao traduz o "type" do audit/conn do RustDesk
++func TipoConexao(t int) string {
++	switch t {
++	case 1:
++		return "arquivos"
++	case 2:
++		return "tunel"
++	}
++	return "controle"
++}
++
++// DescricaoAlerta traduz o "typ" do audit/alarm (AlarmAuditType do RustDesk)
++func DescricaoAlerta(t int) string {
++	switch t {
++	case 0:
++		return "acesso de um IP fora da lista permitida"
++	case 1:
++		return "mais de 30 tentativas de senha"
++	case 2:
++		return "seis tentativas de senha em um minuto"
++	case 6:
++		return "tentativas demais do mesmo endereco IPv6"
++	case 7, 8:
++		return "login do sistema no terminal"
++	case 9:
++		return "acao fora do escopo da sessao"
++	case 10:
++		return "acesso de um ID fora da lista permitida"
++	}
++	return fmt.Sprintf("alerta tipo %d", t)
++}
++
++// FormatarDuracao: "45 s", "12 min", "1 h 05 min"
++func FormatarDuracao(d time.Duration) string {
++	s := int64(d.Seconds())
++	if s < 60 {
++		return fmt.Sprintf("%d s", s)
++	}
++	m := s / 60
++	if m < 60 {
++		return fmt.Sprintf("%d min", m)
++	}
++	return fmt.Sprintf("%d h %02d min", m/60, m%60)
++}
++
++// Ligado diz se o evento deve ser enviado (URL configurada e evento na lista, ou lista vazia)
++func Ligado(evento string) bool {
++	url, _, eventos := lerConfig()
++	if url == "" {
++		return false
++	}
++	if len(eventos) == 0 {
++		return true
++	}
++	for _, e := range eventos {
++		if e == evento {
++			return true
++		}
++	}
++	return false
++}
++
++// Validar confere o evento antes do envio
++func Validar(e *Evento) error {
++	switch e.Evento {
++	case AcessoIniciado, AcessoEncerrado, AlertaSeguranca, TransferenciaArquivo:
++	default:
++		return fmt.Errorf("evento desconhecido: %q", e.Evento)
++	}
++	if strings.TrimSpace(e.ClienteId) == "" {
++		return fmt.Errorf("evento %s sem cliente_id", e.Evento)
++	}
++	return nil
++}
++
++// Enviar manda o evento em segundo plano e volta na hora. Seguro para chamar de qualquer handler
++func Enviar(e Evento) {
++	if !Ligado(e.Evento) {
++		return
++	}
++	if err := Validar(&e); err != nil {
++		log.Printf("webhook: %v", err)
++		return
++	}
++	go func() {
++		defer func() {
++			if r := recover(); r != nil {
++				log.Printf("webhook: erro inesperado no envio de %s: %v", e.Evento, r)
++			}
++		}()
++		enviarAgora(e)
++	}()
++}
++
++func enviarAgora(e Evento) {
++	url, token, _ := lerConfig()
++	if e.Quando == "" {
++		e.Quando = time.Now().Format(time.RFC3339)
++	}
++	if e.ClienteNome == "" {
++		e.ClienteNome = nomeDoComputador(e.ClienteId)
++	}
++	e.Mensagem = Mensagem(e)
++	corpo, err := json.Marshal(e)
++	if err != nil {
++		log.Printf("webhook: %v", err)
++		return
++	}
++	tentativas, codigo, erro := 0, 0, ""
++	for tentativas < 1+len(esperas) {
++		if tentativas > 0 {
++			time.Sleep(esperas[tentativas-1])
++		}
++		tentativas++
++		codigo, erro = postar(url, token, corpo)
++		if erro == "" {
++			break
++		}
++	}
++	status := "enviado"
++	if erro != "" {
++		status = "falhou"
++		log.Printf("webhook: %s de %s nao foi enviado depois de %d tentativas: %s", e.Evento, e.ClienteId, tentativas, erro)
++	}
++	if db.DbEngine != nil {
++		if len(erro) > 500 {
++			erro = erro[:500]
++		}
++		_, _ = db.DbEngine.Insert(&model.WebhookEnvio{
++			Evento:     e.Evento,
++			RustdeskId: e.ClienteId,
++			Status:     status,
++			Tentativas: tentativas,
++			CodigoHttp: codigo,
++			Erro:       erro,
++			Payload:    string(corpo),
++		})
++	}
++}
++
++// postar faz um POST e devolve o codigo HTTP e o erro ("" quando o webhook respondeu 2xx)
++func postar(url, token string, corpo []byte) (int, string) {
++	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(corpo))
++	if err != nil {
++		return 0, err.Error()
++	}
++	req.Header.Set("Content-Type", "application/json")
++	req.Header.Set("User-Agent", "cadena-suporte-api")
++	if token != "" {
++		req.Header.Set("X-Cadena-Token", token)
++	}
++	resp, err := cliente.Do(req)
++	if err != nil {
++		return 0, err.Error()
++	}
++	defer resp.Body.Close()
++	resposta, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
++	if resp.StatusCode < 200 || resp.StatusCode > 299 {
++		return resp.StatusCode, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(resposta)))
++	}
++	return resp.StatusCode, ""
++}
++
++func nomeDoComputador(rustdeskId string) string {
++	if db.DbEngine == nil || rustdeskId == "" {
++		return ""
++	}
++	d := &model.Device{}
++	if ok, err := db.DbEngine.Where("rustdesk_id = ?", rustdeskId).Desc("updated_at").Get(d); err == nil && ok {
++		return d.Hostname
++	}
++	return ""
++}
++
++// Mensagem monta o texto do WhatsApp
++func Mensagem(e Evento) string {
++	cliente := e.ClienteId
++	if e.ClienteNome != "" {
++		cliente = fmt.Sprintf("%s (%s)", e.ClienteNome, e.ClienteId)
++	}
++	tecnico := e.TecnicoNome
++	if tecnico == "" {
++		tecnico = e.TecnicoId
++	}
++	quando := e.Quando
++	if t, err := time.Parse(time.RFC3339, e.Quando); err == nil {
++		quando = t.Format("02/01/2006 15:04")
++	}
++	tipos := map[string]string{"controle": "controle remoto", "arquivos": "transferência de arquivos", "tunel": "túnel TCP"}
++	var l []string
++	switch e.Evento {
++	case AcessoIniciado:
++		l = append(l, "🟢 *Acesso iniciado*", "Cliente: "+cliente)
++		if tecnico != "" {
++			l = append(l, "Técnico: "+tecnico)
++		}
++		if t, ok := tipos[e.Tipo]; ok {
++			l = append(l, "Tipo: "+t)
++		}
++	case AcessoEncerrado:
++		l = append(l, "🔴 *Acesso encerrado*", "Cliente: "+cliente)
++		if tecnico != "" {
++			l = append(l, "Técnico: "+tecnico)
++		}
++		if e.Duracao != "" {
++			l = append(l, "Duração: "+e.Duracao)
++		}
++	case AlertaSeguranca:
++		l = append(l, "⚠️ *Alerta de segurança*", "Cliente: "+cliente, "Motivo: "+e.Alerta)
++	case TransferenciaArquivo:
++		l = append(l, "📁 *Transferência de arquivo*", "Cliente: "+cliente)
++		if tecnico != "" {
++			l = append(l, "Técnico: "+tecnico)
++		}
++		if e.Direcao == "tecnico_para_cliente" {
++			l = append(l, "Sentido: do técnico para o cliente")
++		} else {
++			l = append(l, "Sentido: do cliente para o técnico")
++		}
++		if e.Caminho != "" {
++			l = append(l, "Caminho: "+e.Caminho)
++		}
++		if e.Arquivos > 1 {
++			l = append(l, fmt.Sprintf("Arquivos: %d", e.Arquivos))
++		}
++	}
++	if e.Origem != "" {
++		l = append(l, "IP: "+e.Origem)
++	}
++	l = append(l, "Quando: "+quando)
++	return strings.Join(l, "\n")
++}
+diff --git a/backend/app/webhook/webhook_test.go b/backend/app/webhook/webhook_test.go
+new file mode 100644
+index 0000000..b62679f
+--- /dev/null
++++ b/backend/app/webhook/webhook_test.go
+@@ -0,0 +1,104 @@
++package webhook
++
++import (
++	"encoding/json"
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++// configurar troca so a leitura da configuracao (sem server.yaml nem banco: o envio nao grava a webhook_envio)
++func configurar(t *testing.T, url, token string, eventos []string) {
++	t.Helper()
++	lerAntes, esperasAntes := lerConfig, esperas
++	lerConfig = func() (string, string, []string) { return url, token, eventos }
++	esperas = []time.Duration{10 * time.Millisecond, 10 * time.Millisecond}
++	t.Cleanup(func() { lerConfig = lerAntes; esperas = esperasAntes })
++}
++
++func TestEnviaJsonComTokenEMensagem(t *testing.T) {
++	recebido := make(chan Evento, 1)
++	var token string
++	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		token = r.Header.Get("X-Cadena-Token")
++		corpo, _ := io.ReadAll(r.Body)
++		var e Evento
++		if err := json.Unmarshal(corpo, &e); err != nil {
++			t.Errorf("JSON invalido: %v", err)
++		}
++		recebido <- e
++	}))
++	defer srv.Close()
++	configurar(t, srv.URL, "segredo-teste", nil)
++
++	Enviar(Evento{Evento: AcessoEncerrado, ClienteId: "500688544", ClienteNome: "LOJA-01", TecnicoNome: "Cesar Cadena",
++		Origem: "192.168.15.34", Duracao: FormatarDuracao(65 * time.Minute)})
++	select {
++	case e := <-recebido:
++		if token != "segredo-teste" {
++			t.Errorf("token = %q", token)
++		}
++		if e.Evento != AcessoEncerrado || e.ClienteId != "500688544" || e.Quando == "" {
++			t.Errorf("evento = %+v", e)
++		}
++		for _, trecho := range []string{"Acesso encerrado", "LOJA-01 (500688544)", "Técnico: Cesar Cadena", "Duração: 1 h 05 min", "IP: 192.168.15.34"} {
++			if !strings.Contains(e.Mensagem, trecho) {
++				t.Errorf("mensagem sem %q:\n%s", trecho, e.Mensagem)
++			}
++		}
++	case <-time.After(5 * time.Second):
++		t.Fatal("o webhook nao recebeu o evento")
++	}
++}
++
++func TestTentaDeNovoQuandoFalha(t *testing.T) {
++	var chamadas int32
++	ok := make(chan struct{}, 1)
++	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if atomic.AddInt32(&chamadas, 1) < 3 {
++			w.WriteHeader(http.StatusBadGateway)
++			return
++		}
++		ok <- struct{}{}
++	}))
++	defer srv.Close()
++	configurar(t, srv.URL, "", nil)
++
++	Enviar(Evento{Evento: AlertaSeguranca, ClienteId: "1", Alerta: DescricaoAlerta(2)})
++	select {
++	case <-ok:
++		if n := atomic.LoadInt32(&chamadas); n != 3 {
++			t.Errorf("chamadas = %d, esperado 3", n)
++		}
++	case <-time.After(5 * time.Second):
++		t.Fatal("nao houve nova tentativa")
++	}
++}
++
++func TestEnviarNaoBloqueiaComWebhookFora(t *testing.T) {
++	// porta fechada: o envio falha em segundo plano, mas Enviar volta na hora
++	configurar(t, "http://127.0.0.1:1/nada", "", nil)
++	inicio := time.Now()
++	Enviar(Evento{Evento: AcessoIniciado, ClienteId: "1"})
++	if d := time.Since(inicio); d > 100*time.Millisecond {
++		t.Errorf("Enviar demorou %v", d)
++	}
++}
++
++func TestFiltroDeEventosEValidacao(t *testing.T) {
++	configurar(t, "http://exemplo", "", []string{AlertaSeguranca})
++	if Ligado(AcessoIniciado) || !Ligado(AlertaSeguranca) {
++		t.Error("filtro de eventos errado")
++	}
++	configurar(t, "", "", nil)
++	if Ligado(AlertaSeguranca) {
++		t.Error("sem URL deveria ficar desligado")
++	}
++	if Validar(&Evento{Evento: "outro", ClienteId: "1"}) == nil || Validar(&Evento{Evento: AcessoIniciado}) == nil {
++		t.Error("validacao deveria recusar evento desconhecido e cliente vazio")
++	}
++}
