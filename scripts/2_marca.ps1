@@ -397,14 +397,13 @@ fn cadena_perfil() -> serde_json::Value {
         "key": "$Chave",
         "api-server": "$ApiServidor"
     });
-    let mut padrao = serde_json::json!({ "lang": "pt-br", "allow-auto-update": "Y" });
+    // Tema escuro por padrao: os estilos visuais (style_manager.dart) sao escuros e a barra de titulo acompanha
+    let mut padrao = serde_json::json!({ "lang": "pt-br", "allow-auto-update": "Y", "theme": "dark" });
     if tecnico {
         padrao["allow-auto-record-outgoing"] = "Y".into();
     } else {
         // O cliente aprova cada acesso na janela que traz o aviso da marca
         padrao["approve-mode"] = "click".into();
-        // Tela do Cliente no tema escuro (cadena_cliente.dart), com a barra de titulo junto
-        padrao["theme"] = "dark".into();
         // A aba "Grupo" (computadores dos clientes, vindos da API) so existe no Tecnico
         travas["disable-group-panel"] = "Y".into();
         travas["allow-numeric-one-time-password"] = "Y".into();
@@ -933,6 +932,10 @@ $Tela = [IO.File]::ReadAllText("$PSScriptRoot\modelos\cadena_ftp_tela.dart") -re
 # e visao, e o cartao novo. A lista, o status online e os menus continuam os do RustDesk; muda so a aparencia.
 # Os dois modelos vao como arquivos proprios (UTF-8); o cartao e "part of" do peer_card.dart para usar o menu dele
 Copy-Item -Force "$PSScriptRoot\modelos\cadena_inicio.dart" "$Fonte\flutter\lib\desktop\pages\cadena_inicio.dart"
+# Estilos visuais do Cliente e do Tecnico (Glass & Glow, Onyx Minimal, Modular Space), trocados na hora pela paleta
+New-Item -ItemType Directory -Force "$Fonte\flutter\lib\theme" | Out-Null
+Copy-Item -Force "$PSScriptRoot\modelos\cadena_estilos.dart" "$Fonte\flutter\lib\theme\style_manager.dart"
+& git -C $Fonte add -N flutter/lib/theme/style_manager.dart
 # Tela do Cliente (aprovada em 2026-11-12): logo, slogan, ID grande, WhatsApp do suporte e Sair. Slogan e WhatsApp
 # (so numeros, com DDI e DDD) vem do marca.psd1; vazios, a linha e o botao nao aparecem
 $Whats = ("$($Marca.WhatsApp)" -replace '\D', '')
@@ -952,7 +955,7 @@ Trocar "$Fonte\flutter\lib\common\hbbs\hbbs.dart" @{
   '"note": p\.note,' = "`"note`": p.note,`n      `"alias`": p.alias,"
 }
 Trocar "$Fonte\flutter\lib\common\widgets\peer_card.dart" @{
-  "import 'dart:math' as math;" = "import 'dart:math' as math;`n`n// CadenaTech: cartao do Tecnico`npart 'cadena_cartao.dart';"
+  "import 'dart:math' as math;" = "import 'dart:math' as math;`nimport 'package:flutter_hbb/theme/style_manager.dart';`n`n// CadenaTech: cartao do Tecnico`npart 'cadena_cartao.dart';"
   'Widget _buildPeerCard\(\r?\n      BuildContext context, Peer peer, Rx<BoxDecoration\?> deco\) \{' = "Widget _buildPeerCard(`n      BuildContext context, Peer peer, Rx<BoxDecoration?> deco) {`n    // CadenaTech: cartao novo no Tecnico (cadena_cartao.dart)`n    if (bind.isOutgoingOnly()) return _cadenaCartao(context, peer, deco);"
   # Visao em lista do Tecnico: linha com status, apelido, ID, telefone, sistema e o botao CONECTAR
   'Widget _buildPeerTile\(\r?\n      BuildContext context, Peer peer, Rx<BoxDecoration\?>\? deco\) \{' = "Widget _buildPeerTile(`n      BuildContext context, Peer peer, Rx<BoxDecoration?>? deco) {`n    // CadenaTech: linha nova no Tecnico (cadena_cartao.dart)`n    if (bind.isOutgoingOnly() && deco != null) {`n      return _cadenaLinha(context, peer, deco);`n    }"
@@ -1026,6 +1029,36 @@ Trocar "$Fonte\flutter\lib\desktop\pages\desktop_setting_page.dart" @{
   "import 'package:flutter_hbb/consts.dart';" = $ImpConsole
   "          'Open connection in new tab',\r?\n          kOptionOpenNewConnInTabs,\r?\n          isServer: false,\r?\n        \)," = "          'Open connection in new tab',`n          kOptionOpenNewConnInTabs,`n          isServer: false,`n        ),`n        // CadenaTech: Console Tecnico, padrao de onde abrir os acessos (cadena_console.dart)`n        if (cadenaConsole())`n          _OptionCheckBox(`n            context,`n            'Abrir os acessos em janela separada (fora do console)',`n            kCadenaOpcaoJanela,`n            isServer: false,`n          ),"
 }
+# Configuracoes (aprovado em 2026-11-13): interruptores no lugar de todos os checkboxes (CadenaCheckbox, em
+# style_manager.dart) e a secao "Outro" dividida em Interface e abas, Desempenho e renderizacao e Rede e conexao
+# avancada, esta recolhida por padrao (cadena_outras_opcoes.dart). A tela de FTP ja foi juntada acima
+$OutrasOpcoes = ([IO.File]::ReadAllText("$PSScriptRoot\modelos\cadena_outras_opcoes.dart", [Text.Encoding]::UTF8) -replace "`r`n", "`n").TrimEnd()
+Trocar "$Fonte\flutter\lib\desktop\pages\desktop_setting_page.dart" @{
+  "import 'package:flutter_hbb/desktop/pages/cadena_console.dart';" = "import 'package:flutter_hbb/desktop/pages/cadena_console.dart';`nimport 'package:flutter_hbb/theme/style_manager.dart';"
+  '(?<![A-Za-z_])Checkbox\(' = 'CadenaCheckbox('
+  "(?s)  Widget other\(\) \{\r?\n.*?    return _Card\(title: 'Other', children: children\);\r?\n  \}" = $OutrasOpcoes
+}
+# Visual das Configuracoes (aprovado em 2026-11-13, modelos do usuario): cartoes no estilo atual, fundo do estilo,
+# Tema numa linha, "Gravacao e Midia" com o codec, a aba Geral em duas colunas (FTP a direita) e a lateral com
+# destaque. Os trechos novos ficam no cadena_config_geral.dart, cada um depois de //@@ nome
+$Pecas = @{}
+$NomePeca = $null
+foreach ($linha in ([IO.File]::ReadAllText("$PSScriptRoot\modelos\cadena_config_geral.dart", [Text.Encoding]::UTF8) -replace "`r`n", "`n").Split("`n")) {
+  if ($linha -match '^//@@ (\w+)') { $NomePeca = $Matches[1]; $Pecas[$NomePeca] = New-Object Collections.Generic.List[string]; continue }
+  if ($NomePeca) { $Pecas[$NomePeca].Add($linha) }
+}
+function Peca([string]$nome) { return (($Pecas[$nome] -join "`n").TrimEnd()) }
+Trocar "$Fonte\flutter\lib\desktop\pages\desktop_setting_page.dart" @{
+  "(?s)Widget _Card\(\r?\n    \{required String title,.*?\r?\n\}" = (Peca 'card')
+  "(?s)    return _Card\(title: 'Theme', children: \[\r?\n.*?\r?\n    \]\);" = (Peca 'tema')
+  "(?s)    final scrollController = ScrollController\(\);\r?\n    return ListView\(\r?\n      controller: scrollController,\r?\n      children: \[\r?\n        if \(!isWeb\) service\(\),.*?\)\.marginOnly\(bottom: _kListViewBottomMargin\);" = (Peca 'geral')
+  "      return _Card\(title: 'Recording', children: \[" = (Peca 'gravacao')
+  "    super\.build\(context\);\r?\n    return Scaffold\(\r?\n      backgroundColor: Theme\.of\(context\)\.colorScheme\.background,\r?\n      body: _buildBlock\(" = (Peca 'pagina')
+  "    \);\r?\n  \}\r?\n\r?\n  Widget _header\(BuildContext context\) \{" = (Peca 'pagina_fim')
+  "    final settingsText = Text\(\r?\n      translate\('Settings'\),\r?\n      textAlign: TextAlign\.left,\r?\n      style: const TextStyle\(\r?\n        color: _accentColor,\r?\n        fontSize: _kTitleFontSize,\r?\n        fontWeight: FontWeight\.w400," = (Peca 'titulo')
+  "      return SizedBox\(\r?\n        width: _kTabWidth,\r?\n        height: _kTabHeight,\r?\n        child: InkWell\(" = (Peca 'item')
+  'selected \? _accentColor : null' = 'selected ? cadenaCorSelecao : null'
+}
 # Na janela principal o stateGlobal.windowId e -1; o acesso em aba usa o id 0 (o da principal) para tela cheia,
 # minimizar e o tamanho da janela. Nas janelas de acesso o id e sempre >= 1, entao nada muda nelas
 Trocar "$Fonte\flutter\lib\models\state_model.dart" @{
@@ -1040,7 +1073,13 @@ Trocar "$Fonte\flutter\lib\common\widgets\peer_tab_page.dart" @{
   'children: \[\r?\n        Obx\(\(\) => SizedBox\(\r?\n              height: 32,' = "children: [`n        // CadenaTech: no Tecnico as abas ficam na lateral; o cabecalho so aparece na selecao multipla`n        if (!bind.isOutgoingOnly() || model.multiSelectionMode)`n        Obx(() => SizedBox(`n              height: 32,"
 }
 Trocar "$Fonte\flutter\lib\desktop\pages\desktop_home_page.dart" @{
-  "import 'package:flutter_hbb/desktop/pages/connection_page.dart';" = "import 'package:flutter_hbb/desktop/pages/connection_page.dart';`nimport 'package:flutter_hbb/desktop/pages/cadena_inicio.dart';`nimport 'package:flutter_hbb/desktop/pages/cadena_cliente.dart';"
+  "import 'package:flutter_hbb/desktop/pages/connection_page.dart';" = "import 'package:flutter_hbb/desktop/pages/connection_page.dart';`nimport 'package:flutter_hbb/desktop/pages/cadena_inicio.dart';`nimport 'package:flutter_hbb/desktop/pages/cadena_cliente.dart';`nimport 'package:flutter_hbb/theme/style_manager.dart';"
+  # Fundo e tema do estilo visual em volta da tela inicial (Cliente e Tecnico)
+  '    return _buildBlock\(\r?\n        child: Row\(' = "    return _buildBlock(`n        // CadenaTech: fundo e tema do estilo visual (style_manager.dart)`n        child: CadenaFundo(child: Row("
+  '        if \(!isIncomingOnly\) Expanded\(child: buildRightPane\(context\)\),\r?\n      \],\r?\n    \)\);' = "        if (!isIncomingOnly) Expanded(child: buildRightPane(context)),`n      ],`n    )));"
+  # O painel da direita recebe o context da pagina (acima do CadenaFundo): no Tecnico fica transparente para o fundo
+  # do estilo aparecer
+  '      color: Theme\.of\(context\)\.scaffoldBackgroundColor,\r?\n      child: ConnectionPage\(\),' = "      color: bind.isOutgoingOnly()`n          ? Colors.transparent`n          : Theme.of(context).scaffoldBackgroundColor,`n      child: ConnectionPage(),"
   '        buildLeftPane\(context\),\r?\n        if \(!isIncomingOnly\) const VerticalDivider\(width: 1\),' = "        // CadenaTech: lateral nova no Tecnico (cadena_inicio.dart)`n        bind.isOutgoingOnly() ? const CadenaLateral() : buildLeftPane(context),`n        if (!isIncomingOnly && !bind.isOutgoingOnly())`n          const VerticalDivider(width: 1),"
   # Cliente: tela nova (cadena_cliente.dart). O aviso de senha, os cartoes de ajuda (instalar, permissoes) e o
   # status continuam os do RustDesk, e a janela segue a altura medida pela _childKey

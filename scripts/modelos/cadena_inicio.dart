@@ -15,6 +15,7 @@ import 'package:flutter_hbb/common/widgets/peers_view.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/models/peer_tab_model.dart';
+import 'package:flutter_hbb/theme/style_manager.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 
@@ -728,6 +729,11 @@ class _CadenaTopoState extends State<CadenaTopo> {
                   dica: translate('Refresh'),
                   ativo: false,
                   onTap: () => cadenaRecarregarAba?.call()),
+              // Estilo visual (Glass, Onyx, Modular), troca na hora
+              const Padding(
+                padding: EdgeInsets.only(left: 4),
+                child: CadenaSeletorEstilo(tamanho: 20),
+              ),
             ],
           ));
       }),
