@@ -121,7 +121,8 @@ jobs:
             "CADENA_BUNDLE=$($Marca.Organizacao).$($Marca.NomeCliente.ToLower())",
             "CADENA_EMPRESA=$($Marca.Empresa)"
           )
-          [IO.File]::WriteAllLines("$out\marca.env", $info, (New-Object Text.UTF8Encoding $false))
+          # Linhas em LF: o arquivo e lido no macOS (com CRLF, o nome do app levava um \r no fim)
+          [IO.File]::WriteAllText("$out\marca.env", (($info -join "`n") + "`n"), (New-Object Text.UTF8Encoding $false))
           Get-ChildItem $out | Select-Object Name, Length
 
       - uses: actions/upload-artifact@v6
@@ -244,7 +245,7 @@ jobs:
         run: |
           git -C libs/hbb_common apply --binary --whitespace=nowarn /tmp/marca/hbb_common.patch
           git apply --binary --whitespace=nowarn /tmp/marca/rustdesk.patch
-          cat /tmp/marca/marca.env >> "$GITHUB_ENV"
+          tr -d '\r' < /tmp/marca/marca.env >> "$GITHUB_ENV"
 
       - name: Nome, identificador e icone do app
         run: |
