@@ -85,6 +85,12 @@ class _CadenaLateralState extends State<CadenaLateral> {
   void initState() {
     super.initState();
     _CadenaEstado.iniciar();
+    // Visao padrao do Tecnico: lista (linha com CONECTAR). Quem ja escolheu cartoes ou lista continua com a escolha
+    if (bind.getLocalFlutterOption(k: kOptionPeerCardUiType).isEmpty) {
+      peerCardUiType.value = PeerUiType.list;
+      bind.setLocalFlutterOption(
+          k: kOptionPeerCardUiType, v: PeerUiType.list.index.toString());
+    }
     cadenaCarregarFavoritos();
     bind.mainLoadFavPeers();
     bind.mainGetVersion().then((v) => _versao.value = v);
@@ -661,7 +667,7 @@ class _CadenaTopoState extends State<CadenaTopo> {
               border: InputBorder.none,
               enabledBorder: InputBorder.none,
               focusedBorder: InputBorder.none,
-              hintText: 'Buscar nome, usuário ou ID',
+              hintText: 'Buscar ID, nome, loja ou telefone',
               hintStyle: TextStyle(fontSize: 13.5, color: _suave(context)),
             ),
           ),
@@ -724,6 +730,77 @@ class _CadenaTopoState extends State<CadenaTopo> {
                   onTap: () => cadenaRecarregarAba?.call()),
             ],
           ));
+      }),
+    );
+  }
+}
+
+/// Rodape do Tecnico: servidores que respondem e o operador (a conta da API)
+class CadenaRodape extends StatefulWidget {
+  const CadenaRodape({Key? key}) : super(key: key);
+
+  @override
+  State<CadenaRodape> createState() => _CadenaRodapeState();
+}
+
+class _CadenaRodapeState extends State<CadenaRodape> {
+  final _servidores = RxnString();
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _ler();
+    _timer = Timer.periodic(const Duration(seconds: 3), (_) => _ler());
+  }
+
+  Future<void> _ler() async {
+    _servidores.value = await bind.mainGetCommon(key: 'cadena-servidores');
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final suave = _suave(context);
+    return Container(
+      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.background,
+        border: Border(top: BorderSide(color: _linha(context))),
+      ),
+      child: Obx(() {
+        final serv = _servidores.value;
+        final logado = gFFI.userModel.isLogin;
+        final nome = gFFI.userModel.displayNameOrUserName;
+        final semServidor = serv != null && serv.isEmpty;
+        final texto = serv == null
+            ? 'Verificando servidores...'
+            : (semServidor ? 'Sem conexão com o servidor' : 'Conectado ao servidor $serv');
+        return Row(children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: semServidor
+                    ? const Color(0xFFE04F5F)
+                    : (serv == null ? Colors.orange : Colors.green)),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              '$texto  |  ${logado ? 'Operador: $nome' : 'Sem login'}',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: suave),
+            ),
+          ),
+        ]);
       }),
     );
   }

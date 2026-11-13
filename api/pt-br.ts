@@ -306,7 +306,9 @@ const local: App.I18n.Schema = {
       rustdesk_id: 'ID',
       empresa: 'Empresa',
       apelido: 'Apelido',
-      observacao: 'Observação'
+      observacao: 'Observação',
+      telefone: 'Telefone',
+      sistema: 'Sistema usado'
     },
     audit: {
       username: 'Usuário',
@@ -385,7 +387,7 @@ const local: App.I18n.Schema = {
     CompanyDeleted: 'Empresa excluída',
     DeviceNotFound: 'Dispositivo não encontrado',
     DeviceSaved: 'Dispositivo salvo',
-    DeviceTextTooLong: 'Texto longo demais (nome e apelido até 100 caracteres, observação até 255)',
+    DeviceTextTooLong: 'Texto longo demais (nome, apelido e sistema até 100 caracteres, telefone até 30, observação até 255)',
     ConnectionNotFound: 'Acesso não encontrado ou já encerrado',
     DisconnectRequested: 'Pedido de desconexão enviado',
     TfaRequired: 'Informe o código de 6 dígitos do autenticador (2FA) e o código da imagem de novo',

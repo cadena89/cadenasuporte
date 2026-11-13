@@ -34,6 +34,17 @@ const String kCadenaOpcaoJanela = 'allow-cadena-console-janela';
 const String kCadenaAppType = String.fromEnvironment('APP_TYPE', defaultValue: 'client');
 bool get cadenaAppTecnico => kCadenaAppType == 'tech';
 
+/// Dados a mais de cada computador da aba Clientes, vindos da API (/api/peers, lidos no hbbs.dart): telefone e
+/// sistema usado (ex.: "Mitryus Fly v2.9"). Ficam fora do Peer do RustDesk para nao mexer no modelo dele; a linha
+/// do Tecnico (cadena_cartao.dart) e a busca (common.dart) leem daqui pelo ID
+final Map<String, ({String telefone, String sistema})> cadenaExtras = {};
+
+/// Texto de busca dos dados a mais (telefone e sistema), em minusculas
+String cadenaExtrasBusca(String id) {
+  final e = cadenaExtras[id];
+  return e == null ? '' : '${e.telefone} ${e.sistema}'.toLowerCase();
+}
+
 bool? _console;
 
 /// Verdadeiro so no Console Tecnico

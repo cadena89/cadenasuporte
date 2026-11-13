@@ -403,6 +403,8 @@ fn cadena_perfil() -> serde_json::Value {
     } else {
         // O cliente aprova cada acesso na janela que traz o aviso da marca
         padrao["approve-mode"] = "click".into();
+        // Tela do Cliente no tema escuro (cadena_cliente.dart), com a barra de titulo junto
+        padrao["theme"] = "dark".into();
         // A aba "Grupo" (computadores dos clientes, vindos da API) so existe no Tecnico
         travas["disable-group-panel"] = "Y".into();
         travas["allow-numeric-one-time-password"] = "Y".into();
@@ -931,20 +933,36 @@ $Tela = [IO.File]::ReadAllText("$PSScriptRoot\modelos\cadena_ftp_tela.dart") -re
 # e visao, e o cartao novo. A lista, o status online e os menus continuam os do RustDesk; muda so a aparencia.
 # Os dois modelos vao como arquivos proprios (UTF-8); o cartao e "part of" do peer_card.dart para usar o menu dele
 Copy-Item -Force "$PSScriptRoot\modelos\cadena_inicio.dart" "$Fonte\flutter\lib\desktop\pages\cadena_inicio.dart"
+# Tela do Cliente (aprovada em 2026-11-12): logo, slogan, ID grande, WhatsApp do suporte e Sair. Slogan e WhatsApp
+# (so numeros, com DDI e DDD) vem do marca.psd1; vazios, a linha e o botao nao aparecem
+$Whats = ("$($Marca.WhatsApp)" -replace '\D', '')
+$TelaCliente = [IO.File]::ReadAllText("$PSScriptRoot\modelos\cadena_cliente.dart", [Text.Encoding]::UTF8).Replace('__SLOGAN__', (Para-Dart "$($Marca.Slogan)")).Replace('__WHATSAPP__', $Whats).Replace('__EMPRESA__', (Para-Dart $Empresa))
+[IO.File]::WriteAllText("$Fonte\flutter\lib\desktop\pages\cadena_cliente.dart", $TelaCliente, (New-Object Text.UTF8Encoding $false))
+& git -C $Fonte add -N flutter/lib/desktop/pages/cadena_cliente.dart
 Copy-Item -Force "$PSScriptRoot\modelos\cadena_cartao.dart" "$Fonte\flutter\lib\common\widgets\cadena_cartao.dart"
 & git -C $Fonte add -N flutter/lib/desktop/pages/cadena_inicio.dart flutter/lib/common/widgets/cadena_cartao.dart
 # Aba Clientes: a API manda o apelido do computador (definido no painel, tela Dispositivos) em "alias"; o cartao
-# mostra o apelido no lugar do nome do computador. A empresa vem como grupo (device_group_name)
+# mostra o apelido no lugar do nome do computador. A empresa vem como grupo (device_group_name). O telefone e o
+# sistema usado vao para cadenaExtras (cadena_console.dart), lidos pela linha do Tecnico e pela busca
 Trocar "$Fonte\flutter\lib\common\hbbs\hbbs.dart" @{
-  "  String\? device_group_name;\r?\n  String note = '';" = "  String? device_group_name;`n  String note = '';`n  // CadenaTech: apelido do computador, definido no painel da API`n  String alias = '';"
-  "device_group_name = json\['device_group_name'\] \?\? '',\r?\n        note = json\['note'\] \?\? '';" = "device_group_name = json['device_group_name'] ?? '',`n        note = json['note'] ?? '',`n        alias = json['alias'] ?? '';"
+  "import 'package:flutter_hbb/consts.dart';" = "import 'package:flutter_hbb/consts.dart';`nimport 'package:flutter_hbb/desktop/pages/cadena_console.dart';"
+  "  String\? device_group_name;\r?\n  String note = '';" = "  String? device_group_name;`n  String note = '';`n  // CadenaTech: apelido, telefone e sistema usado, definidos no painel da API`n  String alias = '';`n  String telefone = '';`n  String sistema = '';"
+  "device_group_name = json\['device_group_name'\] \?\? '',\r?\n        note = json\['note'\] \?\? '';" = "device_group_name = json['device_group_name'] ?? '',`n        note = json['note'] ?? '',`n        alias = json['alias'] ?? '',`n        telefone = json['telefone'] ?? '',`n        sistema = json['sistema'] ?? '';"
+  '  static Peer toPeer\(PeerPayload p\) \{\r?\n    return Peer\.fromJson\(\{' = "  static Peer toPeer(PeerPayload p) {`n    cadenaExtras[p.id] = (telefone: p.telefone, sistema: p.sistema);`n    return Peer.fromJson({"
   '"note": p\.note,' = "`"note`": p.note,`n      `"alias`": p.alias,"
 }
 Trocar "$Fonte\flutter\lib\common\widgets\peer_card.dart" @{
   "import 'dart:math' as math;" = "import 'dart:math' as math;`n`n// CadenaTech: cartao do Tecnico`npart 'cadena_cartao.dart';"
   'Widget _buildPeerCard\(\r?\n      BuildContext context, Peer peer, Rx<BoxDecoration\?> deco\) \{' = "Widget _buildPeerCard(`n      BuildContext context, Peer peer, Rx<BoxDecoration?> deco) {`n    // CadenaTech: cartao novo no Tecnico (cadena_cartao.dart)`n    if (bind.isOutgoingOnly()) return _cadenaCartao(context, peer, deco);"
+  # Visao em lista do Tecnico: linha com status, apelido, ID, telefone, sistema e o botao CONECTAR
+  'Widget _buildPeerTile\(\r?\n      BuildContext context, Peer peer, Rx<BoxDecoration\?>\? deco\) \{' = "Widget _buildPeerTile(`n      BuildContext context, Peer peer, Rx<BoxDecoration?>? deco) {`n    // CadenaTech: linha nova no Tecnico (cadena_cartao.dart)`n    if (bind.isOutgoingOnly() && deco != null) {`n      return _cadenaLinha(context, peer, deco);`n    }"
+}
+# Busca do Tecnico ("Buscar ID, nome ou loja"): procura tambem na empresa (grupo), no telefone e no sistema
+Trocar "$Fonte\flutter\lib\common.dart" @{
+  '  if \(peer\.alias\.toLowerCase\(\)\.contains\(searchText\)\) \{' = "  // CadenaTech: empresa (grupo), telefone e sistema usado tambem entram na busca`n  if (peer.alias.toLowerCase().contains(searchText) ||`n      peer.device_group_name.toLowerCase().contains(searchText) ||`n      cadenaExtrasBusca(peer.id).contains(searchText)) {"
 }
 Trocar "$Fonte\flutter\lib\common\widgets\peers_view.dart" @{
+  'Container\(height: 45, child: visibilityChild\)' = "Container(`n                          height: bind.isOutgoingOnly() ? 74 : 45,`n                          child: visibilityChild)"
   'width: 220, height: 140, child: visibilityChild\)' = "width: bind.isOutgoingOnly() ? 236 : 220,`n                              height: bind.isOutgoingOnly() ? 226 : 140,`n                              child: visibilityChild)"
 }
 
@@ -1022,8 +1040,11 @@ Trocar "$Fonte\flutter\lib\common\widgets\peer_tab_page.dart" @{
   'children: \[\r?\n        Obx\(\(\) => SizedBox\(\r?\n              height: 32,' = "children: [`n        // CadenaTech: no Tecnico as abas ficam na lateral; o cabecalho so aparece na selecao multipla`n        if (!bind.isOutgoingOnly() || model.multiSelectionMode)`n        Obx(() => SizedBox(`n              height: 32,"
 }
 Trocar "$Fonte\flutter\lib\desktop\pages\desktop_home_page.dart" @{
-  "import 'package:flutter_hbb/desktop/pages/connection_page.dart';" = "import 'package:flutter_hbb/desktop/pages/connection_page.dart';`nimport 'package:flutter_hbb/desktop/pages/cadena_inicio.dart';"
+  "import 'package:flutter_hbb/desktop/pages/connection_page.dart';" = "import 'package:flutter_hbb/desktop/pages/connection_page.dart';`nimport 'package:flutter_hbb/desktop/pages/cadena_inicio.dart';`nimport 'package:flutter_hbb/desktop/pages/cadena_cliente.dart';"
   '        buildLeftPane\(context\),\r?\n        if \(!isIncomingOnly\) const VerticalDivider\(width: 1\),' = "        // CadenaTech: lateral nova no Tecnico (cadena_inicio.dart)`n        bind.isOutgoingOnly() ? const CadenaLateral() : buildLeftPane(context),`n        if (!isIncomingOnly && !bind.isOutgoingOnly())`n          const VerticalDivider(width: 1),"
+  # Cliente: tela nova (cadena_cliente.dart). O aviso de senha, os cartoes de ajuda (instalar, permissoes) e o
+  # status continuam os do RustDesk, e a janela segue a altura medida pela _childKey
+  '  Widget buildLeftPane\(BuildContext context\) \{\r?\n    final isIncomingOnly = bind\.isIncomingOnly\(\);' = "  Widget buildLeftPane(BuildContext context) {`n    final isIncomingOnly = bind.isIncomingOnly();`n    // CadenaTech: Cliente com a tela nova (cadena_cliente.dart)`n    if (isIncomingOnly) {`n      return CadenaPainelCliente(`n        chave: _childKey,`n        aviso: buildPresetPasswordWarning(),`n        ajuda: Obx(() => buildHelpCards(stateGlobal.updateUrl.value)),`n        status: OnlineStatusWidget(`n          onSvcStatusChanged: () {`n            if (isInHomePage()) {`n              Future.delayed(Duration(milliseconds: 300), () {`n                _updateWindowSize();`n              });`n            }`n          },`n        ),`n        aoMudarTamanho: () {`n          if (isInHomePage()) _updateWindowSize();`n        },`n      );`n    }"
 }
 Trocar "$Fonte\flutter\lib\desktop\pages\connection_page.dart" @{
   "import '../../common/widgets/peer_tab_page.dart';" = "import '../../common/widgets/peer_tab_page.dart';`nimport 'cadena_inicio.dart';"
@@ -1035,12 +1056,12 @@ Trocar "$Fonte\flutter\lib\desktop\pages\connection_page.dart" @{
   '  final _svcIsUsingPublicServer = true\.obs;' = "  final _svcIsUsingPublicServer = true.obs;`n  // CadenaTech: nomes dos servidores que respondem; null = ainda nao testado, vazio = nenhum`n  final _cadenaServidores = RxnString();"
   '    _svcIsUsingPublicServer\.value = await bind\.mainIsUsingPublicServer\(\);' = "    _svcIsUsingPublicServer.value = await bind.mainIsUsingPublicServer();`n    _cadenaServidores.value = await bind.mainGetCommon(key: 'cadena-servidores');"
   'stateGlobal\.svcStatus\.value == SvcStatus\.ready\r?\n                        \? Color\.fromARGB\(255, 50, 190, 166\)' = "stateGlobal.svcStatus.value == SvcStatus.ready &&`n                            _cadenaServidores.value != ''`n                        ? Color.fromARGB(255, 50, 190, 166)"
-  "                  : translate\('Ready'\)," = "                  : _cadenaServidores.value == ''`n                      ? 'Sem conexão com o servidor'`n                      : (_cadenaServidores.value == null`n                          ? translate('Ready')`n                          : '`${translate('Ready')} · `${_cadenaServidores.value}'),"
+  "                  : translate\('Ready'\)," = "                  : _cadenaServidores.value == ''`n                      ? 'Sem conexão com o servidor'`n                      : (_cadenaServidores.value == null`n                          ? translate('Ready')`n                          : 'Conectado de forma segura · `${_cadenaServidores.value}'),"
 }
 # No Tecnico (so acessa) a linha de status vinha escondida, porque ele nao se registra no servidor. Ela passa a
 # aparecer e a depender so do teste dos servidores
 Trocar "$Fonte\flutter\lib\desktop\pages\connection_page.dart" @{
-  'if \(!isOutgoingOnly\) const Divider\(height: 1\),\r?\n        if \(!isOutgoingOnly\) OnlineStatusWidget\(\)' = "// CadenaTech: no Tecnico o status dos servidores fica no cartao da conta, na lateral (cadena_inicio.dart)`n        if (!isOutgoingOnly) const Divider(height: 1),`n        if (!isOutgoingOnly) OnlineStatusWidget()"
+  'if \(!isOutgoingOnly\) const Divider\(height: 1\),\r?\n        if \(!isOutgoingOnly\) OnlineStatusWidget\(\)' = "// CadenaTech: no Tecnico o status dos servidores e o operador ficam no rodape proprio (cadena_inicio.dart)`n        if (!isOutgoingOnly) const Divider(height: 1),`n        if (isOutgoingOnly) const CadenaRodape(),`n        if (!isOutgoingOnly) OnlineStatusWidget()"
   '                color: _svcStopped\.value \|\|' = "                color: bind.isOutgoingOnly()`n                    ? (_cadenaServidores.value == ''`n                        ? Color.fromARGB(255, 224, 79, 95)`n                        : Color.fromARGB(255, 50, 190, 166))`n                    : _svcStopped.value ||"
   '      _svcStopped\.value\r?\n          \? translate\("Service is not running"\)' = "      bind.isOutgoingOnly()`n          ? (_cadenaServidores.value == ''`n              ? 'Sem conexão com o servidor'`n              : _cadenaServidores.value == null`n                  ? 'Verificando servidores...'`n                  : '`${translate('Ready')} · `${_cadenaServidores.value}')`n          : _svcStopped.value`n          ? translate(`"Service is not running`")"
 }

@@ -1117,7 +1117,7 @@ index 926ed0e..f87c4bf 100644
 +	}
  }
 diff --git a/backend/app/controller/api/peer.go b/backend/app/controller/api/peer.go
-index 1f6a795..3c335b6 100644
+index 1f6a795..c78c4a7 100644
 --- a/backend/app/controller/api/peer.go
 +++ b/backend/app/controller/api/peer.go
 @@ -2,6 +2,7 @@ package api
@@ -1208,7 +1208,7 @@ index 1f6a795..3c335b6 100644
  	if err != nil {
  		return mvc.Response{
  			Object: iris.Map{
-@@ -35,18 +83,26 @@ func (c *PeerController) GetPeers() mvc.Result {
+@@ -35,18 +83,29 @@ func (c *PeerController) GetPeers() mvc.Result {
  			},
  		}
  	}
@@ -1240,6 +1240,9 @@ index 1f6a795..3c335b6 100644
 +			"device_group_name": grupo,
 +			"alias":             d.Apelido, // lido pelo Tecnico a partir da v1.0.1 (hbbs.dart)
 +			"note":              d.Observacao,
++			// lidos pelo Tecnico na linha do computador (hbbs.dart -> cadenaExtras)
++			"telefone": d.Telefone,
++			"sistema":  d.Sistema,
  		})
  	}
  	return mvc.Response{
@@ -1477,10 +1480,10 @@ index aaaeee0..eff8b95 100644
  	CreatedAt  time.Time `xorm:"'created_at' datetime created"`
  	UpdatedAt  time.Time `xorm:"'updated_at' datetime updated"`
 diff --git a/backend/app/model/device.go b/backend/app/model/device.go
-index 46ad855..6865c3a 100644
+index 46ad855..1fb3063 100644
 --- a/backend/app/model/device.go
 +++ b/backend/app/model/device.go
-@@ -12,8 +12,12 @@ type Device struct {
+@@ -12,8 +12,16 @@ type Device struct {
  	Username   string    `xorm:"'username' varchar(255)"`
  	Uuid       string    `xorm:"'uuid' varchar(255)"`
  	Version    string    `xorm:"'version' varchar(255)"`
@@ -1491,6 +1494,10 @@ index 46ad855..6865c3a 100644
 +	EmpresaId  int       `xorm:"'empresa_id' int default 0"`
 +	Apelido    string    `xorm:"'apelido' varchar(100) default ''"`
 +	Observacao string    `xorm:"'observacao' varchar(255) default ''"`
++	// CadenaTech: telefone de contato e sistema usado no computador (ex.: "Mitryus Fly v2.9"), mostrados na linha
++	// do computador no Tecnico
++	Telefone string `xorm:"'telefone' varchar(30) default ''"`
++	Sistema  string `xorm:"'sistema' varchar(100) default ''"`
  	CreatedAt  time.Time `xorm:"'created_at' datetime created"`
  	UpdatedAt  time.Time `xorm:"'updated_at' datetime updated"`
  }
@@ -3230,10 +3237,10 @@ index 0bf5641..a1e1926 100644
    "iframe-page": "/iframe-page/:url",
 diff --git a/soybean-admin/src/service/api/cadena.ts b/soybean-admin/src/service/api/cadena.ts
 new file mode 100644
-index 0000000..e5c3205
+index 0000000..ca416db
 --- /dev/null
 +++ b/soybean-admin/src/service/api/cadena.ts
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,106 @@
 +// CadenaTech: empresas, edicao dos dispositivos e acessos em andamento
 +// (backend: app/controller/admin/cadena.go e devices.go)
 +import { request } from '../request';
@@ -3257,6 +3264,8 @@ index 0000000..e5c3205
 +  empresa_id: number;
 +  apelido: string;
 +  observacao: string;
++  telefone: string;
++  sistema: string;
 +}
 +
 +export interface CadenaConexao {
@@ -3914,7 +3923,7 @@ index 5cfa31e..436fb71 100644
  </template>
  
 diff --git a/soybean-admin/src/typings/api.d.ts b/soybean-admin/src/typings/api.d.ts
-index 1513bc1..1f8cd97 100644
+index 1513bc1..d2baf15 100644
 --- a/soybean-admin/src/typings/api.d.ts
 +++ b/soybean-admin/src/typings/api.d.ts
 @@ -36,6 +36,8 @@ declare namespace Api {
@@ -3935,7 +3944,7 @@ index 1513bc1..1f8cd97 100644
        admin_status: number;
        tfa_code: string;
      }>;
-@@ -126,14 +130,28 @@ declare namespace Api {
+@@ -126,14 +130,30 @@ declare namespace Api {
        os: string;
        memory: string;
        created_at: string;
@@ -3944,6 +3953,8 @@ index 1513bc1..1f8cd97 100644
 +      empresa: string;
 +      apelido: string;
 +      observacao: string;
++      telefone: string;
++      sistema: string;
      }>;
      type DevicesList = Common.PaginatingQueryRecord<Device>;
      type DeviceSearchParams = CommonType.RecordNullable<
@@ -3965,7 +3976,7 @@ index 1513bc1..1f8cd97 100644
      type AuditLog = Common.CommonRecord<{
        username: string;
        conn_id: string;
-@@ -142,7 +160,10 @@ declare namespace Api {
+@@ -142,7 +162,10 @@ declare namespace Api {
        session_id: string;
        uuid: string;
        type: number;
@@ -5605,7 +5616,7 @@ index 0000000..4eeb6a6
 +	return "empresa"
 +}
 diff --git a/backend/app/controller/admin/devices.go b/backend/app/controller/admin/devices.go
-index b8c5dbf..f873b80 100644
+index b8c5dbf..b9862f7 100644
 --- a/backend/app/controller/admin/devices.go
 +++ b/backend/app/controller/admin/devices.go
 @@ -1,6 +1,9 @@
@@ -5628,7 +5639,7 @@ index b8c5dbf..f873b80 100644
  }
  
  func (c *DevicesController) HandleList() mvc.Result {
-@@ -24,11 +30,14 @@ func (c *DevicesController) HandleList() mvc.Result {
+@@ -24,11 +30,15 @@ func (c *DevicesController) HandleList() mvc.Result {
  	hostname := c.Ctx.URLParamDefault("hostname", "")
  	username := c.Ctx.URLParamDefault("username", "")
  	rustdesk_id := c.Ctx.URLParamDefault("rustdesk_id", "")
@@ -5639,12 +5650,13 @@ index b8c5dbf..f873b80 100644
  
  		if hostname != "" {
 -			q.Where("hostname LIKE ?", "%"+hostname+"%")
-+			// CadenaTech: o campo do nome procura tambem no apelido e na observacao
-+			q.Where("(hostname LIKE ? or apelido LIKE ? or observacao LIKE ?)", "%"+hostname+"%", "%"+hostname+"%", "%"+hostname+"%")
++			// CadenaTech: o campo do nome procura tambem no apelido, na observacao, no telefone e no sistema
++			t := "%" + hostname + "%"
++			q.Where("(hostname LIKE ? or apelido LIKE ? or observacao LIKE ? or telefone LIKE ? or sistema LIKE ?)", t, t, t, t, t)
  		}
  		if username != "" {
  			q.Where("username LIKE ?", "%"+username+"%")
-@@ -36,6 +45,13 @@ func (c *DevicesController) HandleList() mvc.Result {
+@@ -36,6 +46,13 @@ func (c *DevicesController) HandleList() mvc.Result {
  		if rustdesk_id != "" {
  			q.Where("rustdesk_id LIKE ?", "%"+rustdesk_id+"%")
  		}
@@ -5658,7 +5670,7 @@ index b8c5dbf..f873b80 100644
  		q.Asc("username")
  		return q
  	}
-@@ -43,13 +59,23 @@ func (c *DevicesController) HandleList() mvc.Result {
+@@ -43,13 +60,23 @@ func (c *DevicesController) HandleList() mvc.Result {
  	pagination := db.NewPagination(currentPage, pageSize)
  	deviceList := make([]model.Device, 0)
  
@@ -5683,7 +5695,7 @@ index b8c5dbf..f873b80 100644
  		list = append(list, iris.Map{
  			"id":          a.Id,
  			"rustdesk_id": a.RustdeskId,
-@@ -59,6 +85,10 @@ func (c *DevicesController) HandleList() mvc.Result {
+@@ -59,6 +86,12 @@ func (c *DevicesController) HandleList() mvc.Result {
  			"version":     a.Version,
  			"os":          a.Os,
  			"memory":      a.Memory,
@@ -5691,10 +5703,12 @@ index b8c5dbf..f873b80 100644
 +			"empresa":     nomes[empresa],
 +			"apelido":     a.Apelido,
 +			"observacao":  a.Observacao,
++			"telefone":    a.Telefone,
++			"sistema":     a.Sistema,
  			"created_at":  a.CreatedAt.Format(config.TimeFormat),
  		})
  	}
-@@ -69,3 +99,67 @@ func (c *DevicesController) HandleList() mvc.Result {
+@@ -69,3 +102,74 @@ func (c *DevicesController) HandleList() mvc.Result {
  		"size":    pageSize,
  	}, "ok")
  }
@@ -5708,29 +5722,36 @@ index b8c5dbf..f873b80 100644
 +	return has
 +}
 +
-+// HandleEditar grava a empresa, o apelido e a observacao de um computador
++// HandleEditar grava a empresa, o apelido, a observacao, o telefone e o sistema de um computador
 +func (c *DevicesController) HandleEditar() mvc.Result {
 +	var form struct {
 +		Id         int    `json:"id"`
 +		EmpresaId  int    `json:"empresa_id"`
 +		Apelido    string `json:"apelido"`
 +		Observacao string `json:"observacao"`
++		Telefone   string `json:"telefone"`
++		Sistema    string `json:"sistema"`
 +	}
 +	if err := c.Ctx.ReadJSON(&form); err != nil {
 +		return c.Error(nil, err.Error())
 +	}
 +	form.Apelido = strings.TrimSpace(form.Apelido)
 +	form.Observacao = strings.TrimSpace(form.Observacao)
-+	if utf8.RuneCountInString(form.Apelido) > 100 || utf8.RuneCountInString(form.Observacao) > 255 {
++	form.Telefone = strings.TrimSpace(form.Telefone)
++	form.Sistema = strings.TrimSpace(form.Sistema)
++	if utf8.RuneCountInString(form.Apelido) > 100 || utf8.RuneCountInString(form.Observacao) > 255 ||
++		utf8.RuneCountInString(form.Telefone) > 30 || utf8.RuneCountInString(form.Sistema) > 100 {
 +		return c.Error(nil, "DeviceTextTooLong")
 +	}
 +	if !c.empresaValida(form.EmpresaId) {
 +		return c.Error(nil, "CompanyNotFound")
 +	}
-+	n, err := c.Db.ID(form.Id).Cols("empresa_id", "apelido", "observacao").Update(&model.Device{
++	n, err := c.Db.ID(form.Id).Cols("empresa_id", "apelido", "observacao", "telefone", "sistema").Update(&model.Device{
 +		EmpresaId:  form.EmpresaId,
 +		Apelido:    form.Apelido,
 +		Observacao: form.Observacao,
++		Telefone:   form.Telefone,
++		Sistema:    form.Sistema,
 +	})
 +	if err != nil {
 +		return c.Error(nil, err.Error())
@@ -5763,14 +5784,14 @@ index b8c5dbf..f873b80 100644
 +	return c.Success(nil, "DeviceSaved")
 +}
 diff --git a/soybean-admin/src/views/devices/index.vue b/soybean-admin/src/views/devices/index.vue
-index f4f3c2f..766aa33 100644
+index f4f3c2f..752ffb9 100644
 --- a/soybean-admin/src/views/devices/index.vue
 +++ b/soybean-admin/src/views/devices/index.vue
 @@ -1,5 +1,9 @@
  <script setup lang="tsx">
 +import { computed, onMounted, reactive, ref, watch } from 'vue';
 +import { useRoute } from 'vue-router';
-+import { NButton, NTag, NTooltip } from 'naive-ui';
++import { NButton, NTag } from 'naive-ui';
  import { fetchDevicesList } from '@/service/api/devices';
 +import { editarDispositivo, fetchEmpresas, moverParaEmpresa, type CadenaEmpresa } from '@/service/api/cadena';
  import { $t } from '@/locales';
@@ -5825,7 +5846,7 @@ index f4f3c2f..766aa33 100644
      },
      {
        key: 'rustdesk_id',
-@@ -42,9 +70,41 @@ const {
+@@ -42,9 +70,56 @@ const {
        align: 'center'
      },
      {
@@ -5867,10 +5888,25 @@ index f4f3c2f..766aa33 100644
 +      minWidth: 160,
 +      ellipsis: { tooltip: true },
 +      render: row => row.observacao || <span class="opacity-50">—</span>
++    },
++    {
++      key: 'telefone',
++      title: $t('dataMap.device.telefone' as App.I18n.I18nKey),
++      align: 'left',
++      minWidth: 170,
++      render: row =>
++        row.telefone || row.sistema ? (
++          <div class="flex-col">
++            <span>{row.telefone || '—'}</span>
++            <span class="text-12px opacity-60">{row.sistema}</span>
++          </div>
++        ) : (
++          <span class="opacity-50">—</span>
++        )
      },
      {
        key: 'username',
-@@ -70,25 +130,125 @@ const {
+@@ -70,25 +145,138 @@ const {
        key: 'created_at',
        title: $t('dataMap.audit.created_at'),
        align: 'center'
@@ -5893,7 +5929,16 @@ index f4f3c2f..766aa33 100644
 +// Edicao de um computador
 +const modal = ref(false);
 +const salvando = ref(false);
-+const form = reactive({ id: 0, rustdesk_id: '', hostname: '', empresa_id: 0, apelido: '', observacao: '' });
++const form = reactive({
++  id: 0,
++  rustdesk_id: '',
++  hostname: '',
++  empresa_id: 0,
++  apelido: '',
++  observacao: '',
++  telefone: '',
++  sistema: ''
++});
 +function abrirEdicao(row: Api.Devices.Device) {
 +  Object.assign(form, {
 +    id: row.id,
@@ -5901,7 +5946,9 @@ index f4f3c2f..766aa33 100644
 +    hostname: row.hostname,
 +    empresa_id: row.empresa_id || 0,
 +    apelido: row.apelido || '',
-+    observacao: row.observacao || ''
++    observacao: row.observacao || '',
++    telefone: row.telefone || '',
++    sistema: row.sistema || ''
 +  });
 +  modal.value = true;
 +}
@@ -5911,7 +5958,9 @@ index f4f3c2f..766aa33 100644
 +    id: form.id,
 +    empresa_id: form.empresa_id || 0,
 +    apelido: form.apelido,
-+    observacao: form.observacao
++    observacao: form.observacao,
++    telefone: form.telefone,
++    sistema: form.sistema
 +  });
 +  salvando.value = false;
 +  if (!res.error) {
@@ -5998,7 +6047,7 @@ index f4f3c2f..766aa33 100644
          :loading="loading"
          remote
          :row-key="row => row.id"
-@@ -96,6 +256,37 @@ const {
+@@ -96,6 +284,45 @@ const {
          class="sm:h-full"
        />
      </NCard>
@@ -6016,6 +6065,14 @@ index f4f3c2f..766aa33 100644
 +            placeholder="ex.: Caixa 1 (no Técnico, aparece no lugar do nome do computador)"
 +          />
 +        </NFormItem>
++        <div class="flex gap-12px">
++          <NFormItem class="flex-1" :label="$t('dataMap.device.telefone' as App.I18n.I18nKey)">
++            <NInput v-model:value="form.telefone" maxlength="30" placeholder="ex.: (41) 3031-6161" />
++          </NFormItem>
++          <NFormItem class="flex-1" :label="$t('dataMap.device.sistema' as App.I18n.I18nKey)">
++            <NInput v-model:value="form.sistema" maxlength="100" placeholder="ex.: Mitryus Fly v2.9" />
++          </NFormItem>
++        </div>
 +        <NFormItem :label="$t('dataMap.device.observacao' as App.I18n.I18nKey)">
 +          <NInput
 +            v-model:value="form.observacao"

@@ -28,6 +28,129 @@ Future<void> cadenaAlternarFavorito(String id) async {
   bind.mainLoadFavPeers();
 }
 
+extension _CadenaLinha on _PeerCardState {
+  /// Visao em lista do Tecnico (aprovada em 2026-11-12): bolinha de status + apelido (ou nome do computador) e a
+  /// empresa; abaixo, ID, telefone e sistema usado; a direita, CONECTAR (so online) e o menu do RustDesk
+  Widget _cadenaLinha(BuildContext context, Peer peer, Rx<BoxDecoration?> deco) {
+    final cor = MyTheme.accent;
+    final suave =
+        Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.75) ??
+            Colors.grey;
+    final linha = Theme.of(context).brightness == Brightness.dark
+        ? Colors.white.withOpacity(0.10)
+        : Colors.black.withOpacity(0.10);
+    final nome = peer.alias.isNotEmpty
+        ? peer.alias
+        : (peer.hostname.isNotEmpty ? peer.hostname : formatID(peer.id));
+    final extras = cadenaExtras[peer.id];
+    final detalhes = [
+      'ID: ${formatID(peer.id)}',
+      if (extras != null && extras.telefone.isNotEmpty) extras.telefone,
+      if (extras != null && extras.sistema.isNotEmpty) extras.sistema,
+      if (peer.alias.isNotEmpty && peer.hostname.isNotEmpty) peer.hostname,
+    ].join('  |  ');
+    final statusCor = peer.online ? Colors.green : const Color(0xFFE04F5F);
+
+    return Obx(() => Container(
+          foregroundDecoration: deco.value,
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(_tileRadius + 6),
+            border: Border.all(color: linha),
+          ),
+          padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+          child: Row(children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: peer.online
+                    ? cor.withOpacity(0.14)
+                    : Colors.blueGrey.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(11),
+              ),
+              padding: const EdgeInsets.all(9),
+              child: getPlatformImage(peer.platform, size: 26),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Container(
+                      width: 9,
+                      height: 9,
+                      decoration:
+                          BoxDecoration(shape: BoxShape.circle, color: statusCor),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Tooltip(
+                        message: peer.note.isNotEmpty ? '$nome\n${peer.note}' : nome,
+                        waitDuration: const Duration(milliseconds: 600),
+                        child: Text(nome,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                    if (!peer.online)
+                      Text('  (Desconectado)',
+                          style: TextStyle(fontSize: 13, color: suave)),
+                    if (peer.device_group_name.isNotEmpty)
+                      Container(
+                        margin: const EdgeInsets.only(left: 8),
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: cor.withOpacity(0.10),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(peer.device_group_name,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 11, color: cor)),
+                      ),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text(detalhes,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12.5, color: suave)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            if (peer.online)
+              SizedBox(
+                height: 34,
+                child: ElevatedButton(
+                  onPressed: () => widget.connect(context, peer.id),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: cor,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(7)),
+                  ),
+                  child: const Text('CONECTAR',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700, letterSpacing: 0.6)),
+                ),
+              ),
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 36,
+              height: 34,
+              child: Center(
+                  child: checkBoxOrActionMoreLandscape(peer, isTile: true)),
+            ),
+          ]),
+        ));
+  }
+}
+
 extension _CadenaCartao on _PeerCardState {
   Widget _cadenaCartao(BuildContext context, Peer peer, Rx<BoxDecoration?> deco) {
     final cor = MyTheme.accent;

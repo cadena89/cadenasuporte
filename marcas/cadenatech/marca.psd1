@@ -11,6 +11,10 @@
   ExibidoCliente = 'Cadena Suporte'
   ExibidoTecnico = 'Cadena Técnico'
   Empresa        = 'CadenaTech'
+  # Tela do Cliente: slogan abaixo do logo e WhatsApp do suporte (so numeros, com DDI e DDD, ex.: 5541999999999).
+  # Vazios, a linha e o botao "Chamar Suporte no WhatsApp" nao aparecem
+  Slogan         = ''
+  WhatsApp       = ''
   # Prefixo dos arquivos de configuracao do tecnico (<prefixo>-ftp.txt, <prefixo>-nome-tecnico.txt) e das
   # opcoes de linha de comando (--<prefixo>-nome, --<prefixo>-ftp-teste)
   Prefixo        = 'cadena'
