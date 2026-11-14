@@ -110,9 +110,15 @@ jobs:
           git -C C:\cb\rustdesk\libs\hbb_common add -A
           cmd /c "git -C C:\cb\rustdesk\libs\hbb_common diff --cached --binary HEAD > $out\hbb_common.patch"
           git -C C:\cb\rustdesk add -A -- . ':!libs/hbb_common'
+          # O .gitignore do RustDesk tem "*png": as logos novas da marca (que nao existem no original) ficariam
+          # fora do patch e o app sairia sem logo. -f inclui assim mesmo
+          git -C C:\cb\rustdesk add -f flutter/assets/logo.png flutter/assets/logo_dark.png flutter/assets/logo_light.png
           cmd /c "git -C C:\cb\rustdesk diff --cached --binary HEAD -- . :!libs/hbb_common > $out\rustdesk.patch"
           if ((Get-Item "$out\hbb_common.patch").Length -lt 100) { throw 'patch do hbb_common vazio' }
           if ((Get-Item "$out\rustdesk.patch").Length -lt 1000) { throw 'patch da marca vazio' }
+          foreach ($l in 'logo.png', 'logo_dark.png', 'logo_light.png') {
+            if (-not (Select-String -Path "$out\rustdesk.patch" -SimpleMatch "b/flutter/assets/$l" -Quiet)) { throw "logo $l fora do patch" }
+          }
           Copy-Item C:\cb\marca-gerada\icone-1024.png $out\
           . .\scripts\configuracao.ps1
           $info = @(
@@ -245,6 +251,7 @@ jobs:
         run: |
           git -C libs/hbb_common apply --binary --whitespace=nowarn /tmp/marca/hbb_common.patch
           git apply --binary --whitespace=nowarn /tmp/marca/rustdesk.patch
+          for l in logo.png logo_dark.png logo_light.png; do test -s "flutter/assets/$l" || { echo "falta flutter/assets/$l"; exit 1; }; done
           tr -d '\r' < /tmp/marca/marca.env >> "$GITHUB_ENV"
 
       - name: Nome, identificador e icone do app
