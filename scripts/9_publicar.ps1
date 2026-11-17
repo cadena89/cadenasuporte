@@ -83,7 +83,7 @@ if ($Publicar) {
   $Gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
   if (-not $Gh) { $Gh = "$Raiz\ferramentas\gh\bin\gh.exe" }
   $Arqs = Get-ChildItem $Pasta | ForEach-Object FullName
-  & $Gh release create $Tag @Arqs --repo $RepoAtualizacao --target main --title "$Titulo$Srv" --notes "$($Marca.ExibidoCliente) $VersaoProduto (numero $Numero, baseado no RustDesk $Versao)$Srv." --latest
+  & $Gh release create $Tag @Arqs --repo $RepoAtualizacao --target main --title "$Titulo$Srv" --notes "$($Marca.ExibidoCliente) $VersaoProduto (numero $Numero, baseado no RustDesk $Versao)$Srv.`n`nNo Mac, o aviso da Apple na primeira abertura e esperado: veja como abrir em https://github.com/$RepoAtualizacao#mac" --latest
   if ($LASTEXITCODE -ne 0) { throw "O gh nao publicou a release $Tag" }
   "##### Publicada: https://github.com/$RepoAtualizacao/releases/tag/$Tag"
   "As maquinas com numero menor que $Numero se atualizam em ate um dia, quando nao houver acesso em andamento."

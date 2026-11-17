@@ -10,6 +10,8 @@ const repo = '__REPO__';
 const cliente = '__CLIENTE__';
 const tecnico = '__TECNICO__';
 const paginaVersoes = `https://github.com/${repo}/releases/latest`;
+// Passo a passo para liberar o app no Mac (sem notarizacao da Apple), na secao "mac" do README do repositorio
+const comoAbrirMac = `https://github.com/${repo}#mac`;
 
 interface Arquivo {
   nome: string;
@@ -45,6 +47,7 @@ const instaladorCliente = computed(() => arquivos.value.find(
       (a.nome.startsWith(`${cliente}-`) && a.nome.endsWith('-install.exe'))
   )
 );
+const temMac = computed(() => arquivos.value.some(a => /\.dmg$/i.test(a.nome)));
 
 // Nomes desde a v1.0.0: suporte-vX.Y.Z-<client|tech|console>-<tipo>.<exe|apk|dmg>
 // tipo: x64, x64-portable, x86, x86-portable (Windows), macos-arm64, macos-x64 (Mac), arm64, armv7 (Android)
@@ -161,6 +164,12 @@ onMounted(carregar);
         </span>
         <NButton size="small" tag="a" :href="a.url" type="primary">Baixar</NButton>
         <NButton size="small" @click="copiar(a.url)">Copiar link</NButton>
+      </div>
+      <div v-if="temMac" class="text-12px">
+        Mac: na primeira vez, o macOS avisa que "não pôde verificar" o programa. É esperado. Mande ao cliente
+        o passo a passo:
+        <a :href="comoAbrirMac" target="_blank" rel="noopener" class="text-primary">Como abrir no Mac</a>
+        <NButton size="tiny" class="ml-8px" @click="copiar(comoAbrirMac)">Copiar link</NButton>
       </div>
       <div class="pt-4px text-12px opacity-70">
         Para o cliente, mande o link do instalador do Cliente. Esta lista mostra sempre a última versão
