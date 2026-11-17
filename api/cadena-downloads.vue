@@ -46,8 +46,11 @@ const instaladorCliente = computed(() => arquivos.value.find(
   )
 );
 
-// Nomes desde a v1.0.0: suporte-vX.Y.Z-<client|tech|console>-<x64|x64-portable|arm64|armv7>.<exe|apk>
-const PADRAO = /^suporte-v[\d.]+-(client|tech|console)-(x64|x64-portable|arm64|armv7)\.(exe|apk)$/i;
+// Nomes desde a v1.0.0: suporte-vX.Y.Z-<client|tech|console>-<tipo>.<exe|apk|dmg>
+// tipo: x64, x64-portable, x86, x86-portable (Windows), macos-arm64, macos-x64 (Mac), arm64, armv7 (Android)
+const TIPOS = ['x64', 'x64-portable', 'x86', 'x86-portable', 'macos-arm64', 'macos-x64', 'arm64', 'armv7'];
+const PADRAO =
+  /^suporte-v[\d.]+-(client|tech|console)-(x64|x64-portable|x86|x86-portable|macos-arm64|macos-x64|arm64|armv7)\.(exe|apk|dmg)$/i;
 const QUEM: Record<string, string> = { client: 'Cliente', tech: 'Técnico', console: 'Console Técnico' };
 
 function rotulo(nome: string) {
@@ -57,6 +60,10 @@ function rotulo(nome: string) {
     const tipo = novo[2].toLowerCase();
     if (tipo === 'x64') return `${quem}: instalador (Windows)`;
     if (tipo === 'x64-portable') return `${quem}: portátil, sem instalar (Windows)`;
+    if (tipo === 'x86') return `${quem}: instalador (Windows 32 bits, PCs antigos)`;
+    if (tipo === 'x86-portable') return `${quem}: portátil, sem instalar (Windows 32 bits, PCs antigos)`;
+    if (tipo === 'macos-arm64') return `${quem}: Mac com chip Apple (M1 ou mais novo)`;
+    if (tipo === 'macos-x64') return `${quem}: Mac com processador Intel`;
     return `${quem}: Android (${tipo === 'arm64' ? 'celulares atuais' : 'celulares antigos'})`;
   }
   // Nomes antigos (ate a v1.5.1-13 / v1.5.1-5): <NomeCliente|NomeTecnico>-<versao>-<install|portatil>.exe
@@ -76,7 +83,7 @@ function ordem(nome: string) {
   if (novo) {
     const bases: Record<string, number> = { client: 0, tech: 10, console: 20 };
     const base = bases[novo[1].toLowerCase()] ?? 30;
-    return base + ['x64', 'x64-portable', 'arm64', 'armv7'].indexOf(novo[2].toLowerCase());
+    return base + TIPOS.indexOf(novo[2].toLowerCase());
   }
   const base = nome.startsWith(`${cliente}-`) ? 0 : nome.startsWith(`${tecnico}-`) ? 10 : 20;
   if (nome.endsWith('-install.exe')) return base;
@@ -96,7 +103,7 @@ async function carregar() {
     versao.value = r.tag_name || '';
     data.value = r.published_at ? new Date(r.published_at).toLocaleDateString('pt-BR') : '';
     arquivos.value = (r.assets || [])
-      .filter((a: any) => /\.(exe|apk)$/i.test(a.name))
+      .filter((a: any) => /\.(exe|apk|dmg)$/i.test(a.name))
       .sort((a: any, b: any) => ordem(a.name) - ordem(b.name))
       .map((a: any) => ({
         nome: a.name,
